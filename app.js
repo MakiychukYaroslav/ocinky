@@ -8,7 +8,16 @@ const SUPABASE_KEY = 'sb_publishable_AElwe1x7V10Vn3z0EYi9Qw_br47qhG9';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const KINDS = ['практична', 'лекція', 'семінар', 'самостійна', 'лабораторна', 'тест', 'контрольна', 'модульна', 'ТЗ', 'залік', 'екзамен'];
+// Види робіт (такий самий список дозволяє база). key — для кольору.
+const KINDS = [
+  { name: 'лекція', key: 'lecture', control: false },
+  { name: 'практична', key: 'practice', control: false },
+  { name: 'модульна', key: 'module', control: true },
+  { name: 'залікова', key: 'credit', control: true },
+  { name: 'екзамен', key: 'exam', control: true },
+];
+function kindInfo(name) { return KINDS.find((k) => k.name === name) || KINDS[1]; }
+function kindTag(name, extra) { return h('span', { class: 'ktag k-' + kindInfo(name).key + (extra ? ' ' + extra : '') }, name); }
 const GRADE_RE = /^(1[0-2]|[1-9]|н)$/;
 
 const state = {
@@ -235,6 +244,26 @@ function renderParents() {
   if (!saved) input.focus();
 }
 
+function gradeChip(g, showKind) {
+  return h('div', { class: 'chip-wrap', title: g.kind },
+    h('div', { class: 'g ' + gradeClass(g.value) + (kindInfo(g.kind).control ? ' g-control k-' + kindInfo(g.kind).key : '') }, g.value),
+    h('div', { class: 'chip-date' }, fmtDate(g.date)),
+    showKind ? kindTag(g.kind, 'mini') : null);
+}
+
+function gradeRows(grades) {
+  if (!grades.length) return h('div', { class: 'hint' }, 'Оцінок поки немає.');
+  const current = grades.filter((g) => !kindInfo(g.kind).control);
+  const control = grades.filter((g) => kindInfo(g.kind).control);
+  return h('div', { class: 'stack', style: 'gap:12px' },
+    current.length ? h('div', { class: 'grade-row' },
+      h('div', { class: 'grade-row-title' }, 'Поточні (лекції, практичні)'),
+      h('div', { class: 'chips' }, current.map((g) => gradeChip(g, false)))) : null,
+    control.length ? h('div', { class: 'grade-row control' },
+      h('div', { class: 'grade-row-title' }, 'Контроль (модульні, залікові, екзамен)'),
+      h('div', { class: 'chips' }, control.map((g) => gradeChip(g, true)))) : null);
+}
+
 function renderReport(r) {
   const subjects = (r.subjects || []).slice().sort((a, b) => String(a.subject).localeCompare(String(b.subject), 'uk'));
   const back = h('button', {
@@ -262,17 +291,14 @@ function renderReport(r) {
           h('div', { class: 'subject-name' }, s.subject),
           s.teachers ? h('div', { class: 'hint' }, s.teachers) : null),
         h('div', { class: 'subject-avg' }, h('div', { class: 'k' }, 'середній'), h('div', { class: 'v' }, fmtNum(s.avg)))),
-      (s.grades && s.grades.length)
-        ? h('div', { class: 'chips' }, s.grades.map((g) => h('div', { class: 'chip-wrap', title: g.kind },
-          h('div', { class: 'g ' + gradeClass(g.value) }, g.value),
-          h('div', { class: 'chip-date' }, fmtDate(g.date)))))
-        : h('div', { class: 'hint' }, 'Оцінок поки немає.'),
+      gradeRows(s.grades || []),
       (s.comments || []).map((c) => h('div', { class: 'comment' },
         h('strong', null, 'Коментар викладача (' + fmtDate(c.date) + '): '), c.text)),
     ))
     : [h('div', { class: 'card empty-state' }, 'Оцінок поки немає. Вони з’являться тут одразу, щойно викладачі їх поставлять.')];
 
   const legend = h('div', { class: 'legend' },
+    KINDS.map((k) => h('span', null, kindTag(k.name, 'mini'))),
     h('span', null, h('span', { class: 'g mini g-hi' }, '10'), '10–12'),
     h('span', null, h('span', { class: 'g mini g-mid' }, '7'), '7–9'),
     h('span', null, h('span', { class: 'g mini g-lo' }, '5'), '1–6'),
@@ -407,8 +433,9 @@ async function renderJournal() {
 
   // New column form
   const dateIn = h('input', { id: 'nd', class: 'input', type: 'date', value: todayISO() });
-  const kindIn = h('input', { id: 'nk', class: 'input', list: 'kinds', value: 'практична', style: 'width:170px' });
-  const kinds = h('datalist', { id: 'kinds' }, KINDS.map((k) => h('option', { value: k })));
+  const kindIn = h('select', { id: 'nk', class: 'input', style: 'width:170px' }, KINDS.map((k) => h('option', { value: k.name }, k.name)));
+  kindIn.value = load('j.kind') || 'практична';
+  kindIn.addEventListener('change', () => store('j.kind', kindIn.value));
   const addBtn = h('button', { class: 'btn primary', type: 'submit' }, svgIcon(['M12 5v14', 'M5 12h14'], 16, '#fff'), 'Додати колонку');
   const addForm = h('form', {
     class: 'row',
@@ -418,7 +445,7 @@ async function renderJournal() {
       addBtn.disabled = true;
       setStatus('busy', 'Збереження…');
       const { error } = await sb.from('lessons').insert({
-        group_id: groupId, subject_id: subjectId, lesson_date: dateIn.value || todayISO(), kind: (kindIn.value || 'заняття').trim().slice(0, 40),
+        group_id: groupId, subject_id: subjectId, lesson_date: dateIn.value || todayISO(), kind: kindIn.value,
       });
       addBtn.disabled = false;
       if (error) { setStatus('err', errText(error)); return; }
@@ -427,7 +454,7 @@ async function renderJournal() {
     },
   },
     h('div', { class: 'field' }, h('label', { for: 'nd' }, 'Дата'), dateIn),
-    h('div', { class: 'field' }, h('label', { for: 'nk' }, 'Вид роботи'), kindIn, kinds),
+    h('div', { class: 'field' }, h('label', { for: 'nk' }, 'Вид роботи'), kindIn),
     addBtn);
 
   function setStatus(kind, text) {
@@ -445,6 +472,7 @@ async function renderJournal() {
     h('div', { class: 'notice' }, 'Вписуйте оцінку 1–12 або «н» (пропуск); Enter або ↓ — наступний студент. Щоб видалити оцінку, зітріть її. Зміни зберігаються одразу, і батьки бачать їх відразу.'),
     tableHost,
     h('div', { class: 'legend' },
+      KINDS.map((k) => h('span', null, kindTag(k.name, 'mini'))),
       h('span', null, h('span', { class: 'g mini g-hi' }, '10'), '10–12'),
       h('span', null, h('span', { class: 'g mini g-mid' }, '7'), '7–9'),
       h('span', null, h('span', { class: 'g mini g-lo' }, '5'), '1–6'),
@@ -487,9 +515,9 @@ async function renderJournal() {
 
     const headRow = h('tr', null,
       h('th', { class: 'name', scope: 'col' }, 'Студент'),
-      lessons.map((l) => h('th', { scope: 'col' },
+      lessons.map((l) => h('th', { scope: 'col', class: kindInfo(l.kind).control ? 'col-control k-' + kindInfo(l.kind).key : null },
         h('div', { class: 'd' }, fmtDate(l.lesson_date)),
-        h('div', null, l.kind),
+        h('div', null, kindTag(l.kind)),
         h('button', {
           class: 'col-del', type: 'button', title: 'Видалити колонку', 'aria-label': `Видалити колонку ${fmtDate(l.lesson_date)} ${l.kind}`,
           onclick: async () => {
@@ -536,7 +564,7 @@ async function renderJournal() {
           inp.addEventListener('focus', () => inp.select());
           inp.addEventListener('blur', () => saveCell(inp, l.id, s.id, key));
           inputs[ri][ci] = inp;
-          return h('td', null, inp);
+          return h('td', { class: kindInfo(l.kind).control ? 'col-control k-' + kindInfo(l.kind).key : null }, inp);
         }),
         avgTd,
         h('td', null, h('button', { class: 'btn small', type: 'button', onclick: () => openComments(s) }, 'Коментар')));

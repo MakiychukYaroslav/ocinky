@@ -182,3 +182,21 @@ dialog .card { box-shadow: none; }
   .slip .s { font-size: 9pt; color: #333; }
   .print-head { font-size: 13pt; font-weight: 700; margin-bottom: 8px; }
 }
+
+/* Види робіт: лекція, практична, модульна, залікова, екзамен */
+.ktag { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 2px 8px; line-height: 1.5; }
+.ktag.mini { font-size: 10px; padding: 1px 6px; }
+.k-lecture { --k-bg: #F0F1F4; --k-fg: #2F3542; --k-tint: transparent; }
+.k-practice { --k-bg: #E3ECFC; --k-fg: #1A3F94; --k-tint: transparent; }
+.k-module { --k-bg: #EDE7FB; --k-fg: #5B2BB5; --k-tint: #F8F5FE; --k-line: #B9A4EC; }
+.k-credit { --k-bg: #FDF0DC; --k-fg: #8A5300; --k-tint: #FFFAF2; --k-line: #E8C48A; }
+.k-exam { --k-bg: #FBE4E4; --k-fg: #A11A1A; --k-tint: #FFF6F6; --k-line: #E9A3A3; }
+.ktag { background: var(--k-bg); color: var(--k-fg); }
+/* Контрольні колонки в журналі: тонований фон і рамки зліва/справа */
+.journal th.col-control, .journal td.col-control { background: var(--k-tint); border-left: 2px solid var(--k-line); border-right: 2px solid var(--k-line); }
+.journal thead th.col-control { background: var(--k-tint); }
+/* Контрольна оцінка для батьків: кольорова рамка за видом роботи */
+.g.g-control { box-shadow: inset 0 0 0 2px var(--k-line); }
+.grade-row { display: flex; flex-direction: column; gap: 8px; }
+.grade-row-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.grade-row.control { border-top: 1px dashed var(--line-strong); padding-top: 10px; }
