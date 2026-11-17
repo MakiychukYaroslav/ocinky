@@ -53,8 +53,13 @@ function svgIcon(path, size = 16, color = 'currentColor') {
   return s;
 }
 
+// Like replaceChildren, but skips null/false (otherwise the browser prints "null").
+function fill(el, ...nodes) {
+  el.replaceChildren(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false));
+}
+
 const app = () => document.getElementById('app');
-function mount(...nodes) { const a = app(); a.replaceChildren(...nodes); }
+function mount(...nodes) { const a = app(); fill(a, ...nodes); }
 
 function gradeClass(v) {
   if (v === 'н') return 'g-abs';
@@ -131,7 +136,7 @@ function renderNav() {
   const route = location.hash.replace('#', '') || 'parents';
   const link = (href, text) => h('a', { href: '#' + href, class: route === href ? 'active' : null }, text);
   if (state.session) {
-    nav.replaceChildren(
+    fill(nav, 
       state.me ? h('span', { class: 'who' }, state.me.full_name) : null,
       link('parents', 'Для батьків'),
       state.me ? link('journal', 'Журнал') : null,
@@ -140,7 +145,7 @@ function renderNav() {
       h('button', { class: 'linkbtn', type: 'button', onclick: logout }, 'Вийти'),
     );
   } else {
-    nav.replaceChildren(route === 'login' ? link('parents', 'Для батьків') : link('login', 'Вхід для викладачів'));
+    fill(nav, route === 'login' ? link('parents', 'Для батьків') : link('login', 'Вхід для викладачів'));
   }
 }
 
@@ -196,16 +201,16 @@ function renderParents() {
     onsubmit: async (e) => {
       e.preventDefault();
       const code = normalizeCode(input.value);
-      msg.replaceChildren();
+      fill(msg, );
       if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
-        msg.replaceChildren(h('div', { class: 'error' }, 'Код має 8 символів, наприклад AB3K-7QXM.'));
+        fill(msg, h('div', { class: 'error' }, 'Код має 8 символів, наприклад AB3K-7QXM.'));
         return;
       }
       btn.disabled = true; btn.textContent = 'Завантаження…';
       const { data, error } = await sb.rpc('get_student_report', { p_code: code });
       btn.disabled = false; btn.textContent = 'Переглянути оцінки';
-      if (error) { msg.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
-      if (!data) { msg.replaceChildren(h('div', { class: 'error' }, 'Код не знайдено. Перевірте, чи правильно його введено, або зверніться до куратора групи.')); return; }
+      if (error) { fill(msg, h('div', { class: 'error' }, errText(error))); return; }
+      if (!data) { fill(msg, h('div', { class: 'error' }, 'Код не знайдено. Перевірте, чи правильно його введено, або зверніться до куратора групи.')); return; }
       store('parentCode', remember.checked ? code : null);
       renderReport(data);
     },
@@ -291,10 +296,10 @@ function renderLogin() {
       class: 'card stack',
       onsubmit: async (e) => {
         e.preventDefault();
-        btn.disabled = true; msg.replaceChildren();
+        btn.disabled = true; fill(msg, );
         const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
         btn.disabled = false;
-        if (error) { msg.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+        if (error) { fill(msg, h('div', { class: 'error' }, errText(error))); return; }
         // onAuthStateChange handles the rest
       },
     },
@@ -316,13 +321,13 @@ function renderPassword() {
       class: 'card stack',
       onsubmit: async (e) => {
         e.preventDefault();
-        msg.replaceChildren();
-        if (p1.value.length < 8) { msg.replaceChildren(h('div', { class: 'error' }, 'Пароль має бути щонайменше 8 символів.')); return; }
-        if (p1.value !== p2.value) { msg.replaceChildren(h('div', { class: 'error' }, 'Паролі не збігаються.')); return; }
+        fill(msg, );
+        if (p1.value.length < 8) { fill(msg, h('div', { class: 'error' }, 'Пароль має бути щонайменше 8 символів.')); return; }
+        if (p1.value !== p2.value) { fill(msg, h('div', { class: 'error' }, 'Паролі не збігаються.')); return; }
         const { error } = await sb.auth.updateUser({ password: p1.value });
-        if (error) { msg.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+        if (error) { fill(msg, h('div', { class: 'error' }, errText(error))); return; }
         p1.value = ''; p2.value = '';
-        msg.replaceChildren(h('div', { class: 'success' }, 'Пароль змінено.'));
+        fill(msg, h('div', { class: 'success' }, 'Пароль змінено.'));
       },
     },
       h('div', { class: 'field' }, h('label', { for: 'p1' }, 'Новий пароль'), p1),
@@ -390,7 +395,7 @@ async function renderJournal() {
 
   function fillSubjects() {
     const list = subjectsFor(groupId);
-    subjSel.replaceChildren(...list.map((s) => h('option', { value: s.id }, s.name)));
+    fill(subjSel, ...list.map((s) => h('option', { value: s.id }, s.name)));
     if (!list.some((s) => s.id === subjectId)) subjectId = list.length ? list[0].id : null;
     if (subjectId) subjSel.value = String(subjectId);
   }
@@ -449,21 +454,21 @@ async function renderJournal() {
   async function loadGrid() {
     titleEl.textContent = subjectId ? subjectName(subjectId) : 'Немає предметів';
     subEl.textContent = groupName(groupId);
-    if (!subjectId) { tableHost.replaceChildren(h('div', { class: 'card empty-state' }, 'Для цієї групи немає предметів.')); return; }
-    tableHost.replaceChildren(h('div', { class: 'card empty-state' }, 'Завантаження…'));
+    if (!subjectId) { fill(tableHost, h('div', { class: 'card empty-state' }, 'Для цієї групи немає предметів.')); return; }
+    fill(tableHost, h('div', { class: 'card empty-state' }, 'Завантаження…'));
 
     const [st, ls] = await Promise.all([
       sb.from('students').select('id, full_name').eq('group_id', groupId),
       sb.from('lessons').select('id, lesson_date, kind').eq('group_id', groupId).eq('subject_id', subjectId)
         .order('lesson_date').order('id'),
     ]);
-    if (st.error || ls.error) { tableHost.replaceChildren(h('div', { class: 'error' }, errText(st.error || ls.error))); return; }
+    if (st.error || ls.error) { fill(tableHost, h('div', { class: 'error' }, errText(st.error || ls.error))); return; }
     const students = (st.data || []).sort(byName);
     const lessons = ls.data || [];
     let grades = [];
     if (lessons.length) {
       const gr = await sb.from('grades').select('lesson_id, student_id, value').in('lesson_id', lessons.map((l) => l.id));
-      if (gr.error) { tableHost.replaceChildren(h('div', { class: 'error' }, errText(gr.error))); return; }
+      if (gr.error) { fill(tableHost, h('div', { class: 'error' }, errText(gr.error))); return; }
       grades = gr.data || [];
     }
     subEl.textContent = `${groupName(groupId)} · ${students.length} студентів · ${lessons.length} колонок`;
@@ -472,7 +477,7 @@ async function renderJournal() {
   }
 
   function buildTable(students, lessons, gmap) {
-    if (!students.length) { tableHost.replaceChildren(h('div', { class: 'card empty-state' }, 'У групі немає студентів.')); return; }
+    if (!students.length) { fill(tableHost, h('div', { class: 'card empty-state' }, 'У групі немає студентів.')); return; }
 
     const avgCells = new Map();
     const rowAvg = (sid) => {
@@ -557,7 +562,7 @@ async function renderJournal() {
     }
 
     const table = h('table', { class: 'journal' }, h('thead', null, headRow), h('tbody', null, body));
-    tableHost.replaceChildren(
+    fill(tableHost, 
       lessons.length ? null : h('div', { class: 'notice', style: 'margin-bottom:12px' }, 'Колонок ще немає. Додайте першу: оберіть дату й вид роботи вгорі та натисніть «Додати колонку».'),
       h('div', { class: 'table-box' }, table));
   }
@@ -574,7 +579,7 @@ async function renderJournal() {
           const text = ta.value.trim();
           if (!text) { dlg.close(); return; }
           const { error } = await sb.from('comments').insert({ student_id: student.id, subject_id: subjectId, body: text });
-          if (error) { msg.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+          if (error) { fill(msg, h('div', { class: 'error' }, errText(error))); return; }
           ta.value = '';
           await refresh();
           setStatus('ok', 'Коментар збережено');
@@ -596,15 +601,15 @@ async function renderJournal() {
     async function refresh() {
       const { data, error } = await sb.from('comments').select('id, body, created_at, teacher_id')
         .eq('student_id', student.id).eq('subject_id', subjectId).order('created_at', { ascending: false });
-      if (error) { list.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
-      if (!data.length) { list.replaceChildren(h('div', { class: 'hint' }, 'Коментарів ще немає.')); return; }
-      list.replaceChildren(...data.map((c) => h('div', { class: 'comment row', style: 'justify-content:space-between;align-items:flex-start' },
+      if (error) { fill(list, h('div', { class: 'error' }, errText(error))); return; }
+      if (!data.length) { fill(list, h('div', { class: 'hint' }, 'Коментарів ще немає.')); return; }
+      fill(list, ...data.map((c) => h('div', { class: 'comment row', style: 'justify-content:space-between;align-items:flex-start' },
         h('div', { style: 'flex:1;min-width:0' }, h('strong', null, fmtDate(c.created_at, true) + ': '), c.body),
         (c.teacher_id === me.id || me.is_admin) ? h('button', {
           class: 'btn small danger', type: 'button',
           onclick: async () => {
             const { error: de } = await sb.from('comments').delete().eq('id', c.id);
-            if (de) { msg.replaceChildren(h('div', { class: 'error' }, errText(de))); return; }
+            if (de) { fill(msg, h('div', { class: 'error' }, errText(de))); return; }
             refresh();
           },
         }, 'Видалити') : null)));
@@ -631,7 +636,7 @@ async function renderAdmin() {
   const tabBar = h('div', { class: 'tabs', role: 'tablist' });
 
   function drawTabs() {
-    tabBar.replaceChildren(...tabs.map(([id, label]) => h('button', {
+    fill(tabBar, ...tabs.map(([id, label]) => h('button', {
       class: 'tab' + (id === current ? ' active' : ''), type: 'button', role: 'tab', 'aria-selected': String(id === current),
       onclick: () => { current = id; store('a.tab', id); drawTabs(); show(); },
     }, label)));
@@ -660,20 +665,20 @@ async function adminCodes(host) {
   let rows = [];
   const sel = groupSelect('cg', (gid) => loadCodes(gid), 'a.group');
   const printBtn = h('button', { class: 'btn primary', type: 'button', onclick: () => printSlips() }, 'Друкувати аркуш з кодами');
-  host.replaceChildren(h('div', { class: 'stack' },
+  fill(host, h('div', { class: 'stack' },
     h('div', { class: 'row' }, h('div', { class: 'field' }, h('label', { for: 'cg' }, 'Група'), sel), printBtn),
     h('div', { class: 'notice' }, 'Аркуш друкується по 2 картки в ряд: розріжте й роздайте студентам для батьків. Кожен код відкриває оцінки лише однієї дитини.'),
     tableHost));
 
   async function loadCodes(gid) {
-    tableHost.replaceChildren(h('div', { class: 'hint' }, 'Завантаження…'));
+    fill(tableHost, h('div', { class: 'hint' }, 'Завантаження…'));
     const { data, error } = await sb.from('students').select('id, full_name, parent_codes(code)').eq('group_id', gid);
-    if (error) { tableHost.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+    if (error) { fill(tableHost, h('div', { class: 'error' }, errText(error))); return; }
     rows = (data || []).sort(byName).map((s) => ({
       name: s.full_name,
       code: Array.isArray(s.parent_codes) ? (s.parent_codes[0] || {}).code : (s.parent_codes || {}).code,
     }));
-    tableHost.replaceChildren(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
+    fill(tableHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
       h('table', { class: 'list' },
         h('thead', null, h('tr', null, h('th', null, '№'), h('th', null, 'Студент'), h('th', null, 'Код для батьків'))),
         h('tbody', null, rows.map((r, i) => h('tr', null, h('td', null, String(i + 1)), h('td', null, r.name), h('td', { class: 'mono' }, r.code || '—')))))));
@@ -683,7 +688,7 @@ async function adminCodes(host) {
     const gname = groupName(Number(sel.value));
     const url = location.origin + location.pathname;
     const area = document.getElementById('print-area');
-    area.replaceChildren(
+    fill(area, 
       h('div', { class: 'print-head' }, 'Коди для перегляду оцінок · ' + gname),
       h('div', { class: 'slips' }, rows.map((r) => h('div', { class: 'slip' },
         h('div', { class: 't' }, 'Оцінки онлайн — для батьків'),
@@ -701,18 +706,18 @@ async function adminStudents(host) {
   const sel = groupSelect('sg', (gid) => loadList(gid), 'a.group');
   const nameIn = h('input', { id: 'sn', class: 'input', placeholder: 'Прізвище Ім’я По батькові', style: 'min-width:320px' });
   const msg = h('div');
-  host.replaceChildren(h('div', { class: 'stack' },
+  fill(host, h('div', { class: 'stack' },
     h('div', { class: 'row' }, h('div', { class: 'field' }, h('label', { for: 'sg' }, 'Група'), sel)),
     h('form', {
       class: 'card row',
       onsubmit: async (e) => {
         e.preventDefault();
         const name = nameIn.value.trim().replace(/\s+/g, ' ');
-        if (name.split(' ').length < 2) { msg.replaceChildren(h('div', { class: 'error' }, 'Вкажіть щонайменше прізвище та ім’я.')); return; }
+        if (name.split(' ').length < 2) { fill(msg, h('div', { class: 'error' }, 'Вкажіть щонайменше прізвище та ім’я.')); return; }
         const { error } = await sb.from('students').insert({ group_id: Number(sel.value), full_name: name });
-        if (error) { msg.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+        if (error) { fill(msg, h('div', { class: 'error' }, errText(error))); return; }
         nameIn.value = '';
-        msg.replaceChildren(h('div', { class: 'success' }, 'Студента додано, код для батьків створено автоматично.'));
+        fill(msg, h('div', { class: 'success' }, 'Студента додано, код для батьків створено автоматично.'));
         loadList(Number(sel.value));
       },
     },
@@ -723,9 +728,9 @@ async function adminStudents(host) {
 
   async function loadList(gid) {
     const { data, error } = await sb.from('students').select('id, full_name').eq('group_id', gid);
-    if (error) { listHost.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+    if (error) { fill(listHost, h('div', { class: 'error' }, errText(error))); return; }
     const rows = (data || []).sort(byName);
-    listHost.replaceChildren(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
+    fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
       h('table', { class: 'list' },
         h('thead', null, h('tr', null, h('th', null, '№'), h('th', null, 'Студент'), h('th', null, ''))),
         h('tbody', null, rows.map((s, i) => h('tr', null,
@@ -735,7 +740,7 @@ async function adminStudents(host) {
             onclick: async () => {
               if (!confirm(`Видалити студента «${s.full_name}» разом з усіма його оцінками? Цю дію не можна скасувати.`)) return;
               const { error: de } = await sb.from('students').delete().eq('id', s.id);
-              if (de) { msg.replaceChildren(h('div', { class: 'error' }, errText(de))); return; }
+              if (de) { fill(msg, h('div', { class: 'error' }, errText(de))); return; }
               loadList(gid);
             },
           }, 'Видалити'))))))));
@@ -757,7 +762,7 @@ async function adminTeachers(host) {
   const gSel = h('select', { class: 'input', 'aria-label': 'Група' }, state.groups.map((g) => h('option', { value: g.id }, g.name)));
   const sSel = h('select', { class: 'input', 'aria-label': 'Предмет' }, state.subjects.map((s) => h('option', { value: s.id }, s.name)));
   function drawPairs() {
-    pairsHost.replaceChildren(...pairs.map((p, i) => h('span', { class: 'pill' }, `${subjectName(p.subject_id)} — ${groupName(p.group_id)}`,
+    fill(pairsHost, ...pairs.map((p, i) => h('span', { class: 'pill' }, `${subjectName(p.subject_id)} — ${groupName(p.group_id)}`,
       h('button', { type: 'button', 'aria-label': 'Прибрати', onclick: () => { pairs.splice(i, 1); drawPairs(); } }, '✕'))));
   }
   const createBtn = h('button', { class: 'btn primary', type: 'submit' }, 'Створити акаунт');
@@ -765,7 +770,7 @@ async function adminTeachers(host) {
     class: 'card stack',
     onsubmit: async (e) => {
       e.preventDefault();
-      msg.replaceChildren();
+      fill(msg, );
       createBtn.disabled = true; createBtn.textContent = 'Створення…';
       const { data, error } = await sb.functions.invoke('create-teacher', {
         body: { full_name: fn.value.trim(), email: em.value.trim(), password: pw.value, is_admin: adm.checked, assignments: pairs },
@@ -775,8 +780,8 @@ async function adminTeachers(host) {
       if (error) {
         try { const b = await error.context.json(); errMsg = b.error || error.message; } catch (x) { errMsg = error.message; }
       } else if (data && data.error) errMsg = data.error;
-      if (errMsg) { msg.replaceChildren(h('div', { class: 'error' }, errMsg)); return; }
-      msg.replaceChildren(h('div', { class: 'success' },
+      if (errMsg) { fill(msg, h('div', { class: 'error' }, errMsg)); return; }
+      fill(msg, h('div', { class: 'success' },
         `Акаунт створено. Передайте викладачу: сайт ${location.origin + location.pathname}, пошта ${em.value.trim()}, тимчасовий пароль ${pw.value}. Після входу хай змінить пароль у меню «Змінити пароль».`,
         data && data.warning ? ' ' + data.warning : ''));
       fn.value = ''; em.value = ''; pw.value = genPassword(); adm.checked = false; pairs.length = 0; drawPairs();
@@ -805,13 +810,13 @@ async function adminTeachers(host) {
     h('div', null, createBtn),
     msg);
 
-  host.replaceChildren(h('div', { class: 'stack' }, form, listHost));
+  fill(host, h('div', { class: 'stack' }, form, listHost));
 
   async function loadList() {
     const { data, error } = await sb.from('teachers').select('id, full_name, email, is_admin');
-    if (error) { listHost.replaceChildren(h('div', { class: 'error' }, errText(error))); return; }
+    if (error) { fill(listHost, h('div', { class: 'error' }, errText(error))); return; }
     const teachers = (data || []).sort(byName);
-    listHost.replaceChildren(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
+    fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
       h('table', { class: 'list' },
         h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Предмети й групи'), h('th', null, 'Додати'))),
         h('tbody', null, teachers.map((t) => {
@@ -828,7 +833,7 @@ async function adminTeachers(host) {
                 onclick: async () => {
                   const { error: de } = await sb.from('teacher_assignments').delete()
                     .eq('teacher_id', t.id).eq('group_id', a.group_id).eq('subject_id', a.subject_id);
-                  if (de) { msg.replaceChildren(h('div', { class: 'error' }, errText(de))); return; }
+                  if (de) { fill(msg, h('div', { class: 'error' }, errText(de))); return; }
                   await loadRefs(); loadList();
                 },
               }, '✕'))) : h('span', { class: 'hint' }, t.is_admin ? 'Адміністратор має доступ до всіх груп' : 'Нічого не закріплено')),
@@ -838,7 +843,7 @@ async function adminTeachers(host) {
                 onclick: async () => {
                   const { error: ie } = await sb.from('teacher_assignments')
                     .upsert({ teacher_id: t.id, group_id: Number(g2.value), subject_id: Number(s2.value) }, { ignoreDuplicates: true });
-                  if (ie) { msg.replaceChildren(h('div', { class: 'error' }, errText(ie))); return; }
+                  if (ie) { fill(msg, h('div', { class: 'error' }, errText(ie))); return; }
                   await loadRefs(); loadList();
                 },
               }, 'Закріпити'))));
@@ -858,22 +863,22 @@ async function adminSubjects(host) {
       const name = input.value.trim();
       if (!name) return;
       const { error } = await sb.from(table).insert({ name });
-      if (error) { msg.replaceChildren(h('div', { class: 'error' }, /duplicate/i.test(error.message) ? 'Така назва вже є.' : errText(error))); return; }
+      if (error) { fill(msg, h('div', { class: 'error' }, /duplicate/i.test(error.message) ? 'Така назва вже є.' : errText(error))); return; }
       input.value = '';
-      msg.replaceChildren(h('div', { class: 'success' }, 'Додано.'));
+      fill(msg, h('div', { class: 'success' }, 'Додано.'));
       await loadRefs(); draw();
     },
   }, h('div', { class: 'field', style: 'flex:1' }, h('label', { for: input.id }, label), input), h('button', { class: 'btn primary', type: 'submit' }, 'Додати'));
 
   const lists = h('div', { class: 'row', style: 'align-items:flex-start' });
   function draw() {
-    lists.replaceChildren(
+    fill(lists, 
       h('div', { class: 'card', style: 'flex:1;min-width:280px' }, h('h2', { style: 'font-size:16px;margin-bottom:8px' }, `Предмети (${state.subjects.length})`),
         h('ul', { style: 'margin:0;padding-left:18px' }, state.subjects.map((s) => h('li', null, s.name)))),
       h('div', { class: 'card', style: 'flex:1;min-width:280px' }, h('h2', { style: 'font-size:16px;margin-bottom:8px' }, `Групи (${state.groups.length})`),
         h('ul', { style: 'margin:0;padding-left:18px' }, state.groups.map((g) => h('li', null, g.name)))));
   }
-  host.replaceChildren(h('div', { class: 'stack' }, addTo('subjects', sIn, 'Новий предмет'), addTo('groups', gIn, 'Нова група'), msg, lists));
+  fill(host, h('div', { class: 'stack' }, addTo('subjects', sIn, 'Новий предмет'), addTo('groups', gIn, 'Нова група'), msg, lists));
   draw();
 }
 
