@@ -46,19 +46,22 @@ function normCell(raw) {
   const x = String(raw).trim().toLowerCase().replace(',', '.');
   if (x === '') return '';
   if (/^[hн]$/.test(x)) return 'н';
+  if (/^[pп]$/.test(x)) return 'п';
   if (/^\d+(\.\d)?$/.test(x)) return String(Number(x)); // '2.0' → '2'
   return x;
 }
 function validCell(v, lesson) {
-  if (v === '' || v === 'н') return true;
-  if (lesson.kind === 'лекція') return false;
+  if (v === '' || v === 'н' || v === 'п') return true;
+  if (!lesson.max_points) return false;
   return POINTS_RE.test(v) && Number(v) <= Number(lesson.max_points);
 }
-// Скільки балів дає клітинка: лекція з балами = максимум, якщо немає «н» і дата вже настала
+function markClass(v) { return v === 'н' ? 'g-abs' : v === 'п' ? 'g-pres' : ''; }
+function cellText(v) { return v === 'н' || v === 'п' ? v : fmtPts(v); }
+// Скільки балів дає клітинка: «н» і «п» — 0, число — бали
 function cellPoints(lesson, value) {
-  if (value === 'н') return 0;
-  if (lesson.kind === 'лекція') return lesson.max_points && lesson.lesson_date <= todayISO() ? Number(lesson.max_points) : null;
-  return value !== undefined && value !== null && value !== '' ? Number(value) : null;
+  if (value === undefined || value === null || value === '') return null;
+  if (value === 'н' || value === 'п') return 0;
+  return Number(value);
 }
 
 const state = {
@@ -287,30 +290,29 @@ function renderParents() {
 
 function workChip(w) {
   const ctrl = kindInfo(w.kind).control;
-  const abs = w.value === 'н';
+  const mark = w.value === 'н' || w.value === 'п';
   return h('div', { class: 'chip-wrap', title: w.kind + (w.max ? ', максимум ' + fmtPts(w.max) : '') },
-    h('div', { class: 'g ' + (abs ? 'g-abs' : pctClass(w.points, w.max)) + (ctrl ? ' g-control k-' + kindInfo(w.kind).key : '') },
-      abs ? 'н' : fmtPts(w.points), h('span', { class: 'of' }, '/' + fmtPts(w.max))),
+    h('div', { class: 'g ' + (mark ? markClass(w.value) : pctClass(w.points, w.max)) + (ctrl ? ' g-control k-' + kindInfo(w.kind).key : '') },
+      mark ? w.value : fmtPts(w.points), !mark && w.max ? h('span', { class: 'of' }, '/' + fmtPts(w.max)) : null),
     h('div', { class: 'chip-date' }, fmtDate(w.date)),
     ctrl ? kindTag(w.kind, 'mini') : null);
 }
 
 function gradeRows(works) {
-  const lectures = works.filter((w) => w.kind === 'лекція');
-  const current = works.filter((w) => w.kind === 'практична' && w.value !== null && w.value !== undefined);
-  const control = works.filter((w) => kindInfo(w.kind).control && w.value !== null && w.value !== undefined);
-  const lecDone = lectures.filter((w) => w.date <= todayISO());
-  const lecAbs = lecDone.filter((w) => w.value === 'н');
-  const lecPts = lecDone.filter((w) => w.max).reduce((a, w) => a + (w.points || 0), 0);
-  const lecMax = lecDone.filter((w) => w.max).reduce((a, w) => a + Number(w.max), 0);
-  if (!current.length && !control.length && !lecDone.length) return h('div', { class: 'hint' }, 'Оцінок поки немає.');
+  const marked = (w) => w.value !== null && w.value !== undefined;
+  const lectures = works.filter((w) => w.kind === 'лекція' && marked(w));
+  const current = works.filter((w) => w.kind === 'практична' && marked(w));
+  const control = works.filter((w) => kindInfo(w.kind).control && marked(w));
+  if (!lectures.length && !current.length && !control.length) return h('div', { class: 'hint' }, 'Оцінок поки немає.');
+  const lecAbs = lectures.filter((w) => w.value === 'н');
+  const lecPts = lectures.reduce((a, w) => a + (w.points || 0), 0);
   return h('div', { class: 'stack', style: 'gap:12px' },
-    lecDone.length ? h('div', { class: 'grade-row' },
+    lectures.length ? h('div', { class: 'grade-row' },
       h('div', { class: 'grade-row-title' }, 'Лекції'),
-      h('div', null,
-        `Проведено ${lecDone.length}, пропущено ${lecAbs.length}`,
-        lecAbs.length ? ' (' + lecAbs.map((w) => fmtDate(w.date)).join(', ') + ')' : '',
-        lecMax ? ` · бали за присутність: ${fmtPts(lecPts)} з ${fmtPts(lecMax)}` : '')) : null,
+      h('div', { class: 'hint', style: 'color:var(--text)' },
+        `Присутність: ${lectures.length - lecAbs.length} з ${lectures.length}`,
+        lecPts ? ` · бали: ${fmtPts(lecPts)}` : ''),
+      h('div', { class: 'chips' }, lectures.map(workChip))) : null,
     current.length ? h('div', { class: 'grade-row' },
       h('div', { class: 'grade-row-title' }, 'Практичні'),
       h('div', { class: 'chips' }, current.map(workChip))) : null,
@@ -360,7 +362,8 @@ function renderReport(r) {
     h('span', null, h('span', { class: 'g mini g-hi' }, '2/2'), '85% і більше від максимуму'),
     h('span', null, h('span', { class: 'g mini g-mid' }, '15'), '60–84%'),
     h('span', null, h('span', { class: 'g mini g-lo' }, '1'), 'менше 60%'),
-    h('span', null, h('span', { class: 'g mini g-abs' }, 'н'), 'пропуск'));
+    h('span', null, h('span', { class: 'g mini g-abs' }, 'н'), 'не було'),
+    h('span', null, h('span', { class: 'g mini g-pres' }, 'п'), 'присутній'));
 
   mount(h('div', { class: 'mid stack' }, h('div', null, back), head, cards, legend,
     h('div', { class: 'hint' }, 'Оцінка ECTS рахується від поточної суми балів; остаточна — наприкінці семестру. Шкала: 90–100 A, 82–89 B, 75–81 C, 68–74 D, 60–67 E, 35–59 FX, менше 35 F.')));
@@ -501,7 +504,7 @@ async function renderJournal() {
     maxIn.required = !lec;
     maxIn.placeholder = lec ? 'без балів' : 'напр. 2';
     maxIn.value = load('j.max.' + kindIn.value) || '';
-    maxHint.textContent = lec ? 'Порожньо — лише присутність. З балами — нараховуються всім, хто без «н».' : '';
+    maxHint.textContent = lec ? 'Порожньо — лише присутність («н»/«п»). З максимумом — можна ставити й бали.' : '';
   }
   syncMax();
   kindIn.addEventListener('change', () => { store('j.kind', kindIn.value); syncMax(); });
@@ -543,14 +546,15 @@ async function renderJournal() {
         h('div', { class: 'field' }, h('label', { for: 'js' }, 'Предмет'), subjSel)),
       addForm),
     h('div', { class: 'toolbar' }, h('div', null, titleEl, subEl), status),
-    h('div', { class: 'notice' }, 'Рейтингова система: у кожній колонці — бали від 0 до її максимуму (можна з половинкою: 1,5) або «н» (пропуск). На лекціях ставте лише «н»: присутнім бали нараховуються автоматично. Enter або ↓ — наступний студент. Зміни зберігаються одразу, батьки бачать їх відразу.'),
+    h('div', { class: 'notice' }, 'У клітинку ставте: «н» — не було, «п» — присутній (0 балів), або бали від 0 до максимуму колонки (можна 1,5). У колонці без балів — лише «н» або «п». Enter або ↓ — наступний студент. Зміни зберігаються одразу, батьки бачать їх відразу.'),
     tableHost,
     h('div', { class: 'legend' },
       KINDS.map((k) => h('span', null, kindTag(k.name, 'mini'))),
       h('span', null, h('span', { class: 'g mini g-hi' }, '2'), '85%+ від максимуму'),
       h('span', null, h('span', { class: 'g mini g-mid' }, '15'), '60–84%'),
       h('span', null, h('span', { class: 'g mini g-lo' }, '1'), 'менше 60%'),
-      h('span', null, h('span', { class: 'g mini g-abs' }, 'н'), 'пропуск')),
+      h('span', null, h('span', { class: 'g mini g-abs' }, 'н'), 'не було'),
+      h('span', null, h('span', { class: 'g mini g-pres' }, 'п'), 'присутній')),
   ));
 
   async function loadGrid() {
@@ -618,16 +622,15 @@ async function renderJournal() {
           const key = l.id + ':' + s.id;
           const v = gmap.get(key) || '';
           const lec = l.kind === 'лекція';
-          const cls = (x) => (x === 'н' ? 'g-abs' : lec ? 'lec' : pctClass(x === '' ? null : Number(x), l.max_points));
+          const cls = (x) => markClass(x) || (x === '' ? (lec ? 'lec' : '') : pctClass(Number(x), l.max_points));
           const inp = h('input', {
-            class: 'cell ' + cls(v), value: fmtPts(v === 'н' ? '' : v) || (v === 'н' ? 'н' : ''), maxlength: '5', inputmode: lec ? 'text' : 'decimal', autocomplete: 'off',
-            placeholder: lec ? (l.max_points ? '+' + fmtPts(l.max_points) : '+') : '',
+            class: 'cell ' + cls(v), value: cellText(v), maxlength: '5', inputmode: l.max_points ? 'decimal' : 'text', autocomplete: 'off',
             'aria-label': `${s.full_name}, ${fmtDate(l.lesson_date)} ${l.kind}` + (l.max_points ? `, максимум ${fmtPts(l.max_points)}` : ''),
           });
           inp.dataset.saved = v;
           inp.addEventListener('input', () => {
             const x = normCell(inp.value);
-            if (/[hн]/i.test(inp.value)) inp.value = 'н';
+            if (x === 'н' || x === 'п') inp.value = x;
             inp.className = 'cell ' + (validCell(x, l) ? cls(x) : 'bad');
           });
           inp.addEventListener('keydown', (e) => {
@@ -636,7 +639,7 @@ async function renderJournal() {
             else if (e.key === 'ArrowUp') go(ri - 1, ci);
             else if (e.key === 'ArrowRight' && inp.selectionStart === inp.value.length) go(ri, ci + 1);
             else if (e.key === 'ArrowLeft' && inp.selectionStart === 0) go(ri, ci - 1);
-            else if (e.key === 'Escape') { inp.value = fmtPts(inp.dataset.saved === 'н' ? '' : inp.dataset.saved) || (inp.dataset.saved === 'н' ? 'н' : ''); inp.dispatchEvent(new Event('input')); }
+            else if (e.key === 'Escape') { inp.value = cellText(inp.dataset.saved); inp.dispatchEvent(new Event('input')); }
           });
           inp.addEventListener('focus', () => inp.select());
           inp.addEventListener('blur', () => saveCell(inp, l, s.id, key));
@@ -652,9 +655,9 @@ async function renderJournal() {
       const v = normCell(inp.value);
       if (v === inp.dataset.saved) return;
       if (!validCell(v, lesson)) {
-        setStatus('err', lesson.kind === 'лекція'
-          ? 'На лекції ставиться лише «н». Присутнім бали нараховуються автоматично.'
-          : `«${inp.value}» — недопустимо. Можна від 0 до ${fmtPts(lesson.max_points)} (крок 0,5) або «н».`);
+        setStatus('err', !lesson.max_points
+          ? 'У цій колонці немає балів: можна лише «н» (не було) або «п» (присутній).'
+          : `«${inp.value}» — недопустимо. Можна від 0 до ${fmtPts(lesson.max_points)} (крок 0,5), «н» або «п».`);
         return;
       }
       setStatus('busy', 'Збереження…');

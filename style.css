@@ -214,3 +214,4 @@ dialog .card { box-shadow: none; }
 .cell { width: 54px; }
 .cell::placeholder { color: #A3A9B5; font-weight: 600; }
 .cell.lec { background: #FAFBFC; }
+.g-pres, .cell.g-pres { background: #E7F5EC; color: #0F6B3E; border-color: transparent; }
