@@ -200,3 +200,17 @@ dialog .card { box-shadow: none; }
 .grade-row { display: flex; flex-direction: column; gap: 8px; }
 .grade-row-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .grade-row.control { border-top: 1px dashed var(--line-strong); padding-top: 10px; }
+
+/* Рейтингова система */
+.g .of { font-size: 11px; font-weight: 600; opacity: 0.7; margin-left: 1px; }
+.subject-avg .v .of { font-size: 13px; font-weight: 600; color: var(--muted); opacity: 1; }
+.ects { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 2px 8px; }
+.ects-mini { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; border-radius: 5px; padding: 1px 5px; vertical-align: 1px; }
+.ects-A, .ects-B, .ects-C, .ects-D, .ects-E { background: #E3ECFC; color: #1A3F94; }
+.ects-FX, .ects-F { background: #FBE4E4; color: #A11A1A; }
+.journal .maxp { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+.journal .maxp.over { color: var(--err); }
+.journal .avg { min-width: 110px; }
+.cell { width: 54px; }
+.cell::placeholder { color: #A3A9B5; font-weight: 600; }
+.cell.lec { background: #FAFBFC; }

@@ -18,7 +18,48 @@ const KINDS = [
 ];
 function kindInfo(name) { return KINDS.find((k) => k.name === name) || KINDS[1]; }
 function kindTag(name, extra) { return h('span', { class: 'ktag k-' + kindInfo(name).key + (extra ? ' ' + extra : '') }, name); }
-const GRADE_RE = /^(1[0-2]|[1-9]|н)$/;
+const POINTS_RE = /^(100|[0-9]{1,2})(\.[05])?$/; // 0–100, крок 0,5
+
+// Шкала МАУП (ECTS) для суми балів за семестр
+function ects(total) {
+  if (total >= 90) return { l: 'A', t: 'відмінно' };
+  if (total >= 82) return { l: 'B', t: 'добре' };
+  if (total >= 75) return { l: 'C', t: 'добре' };
+  if (total >= 68) return { l: 'D', t: 'задовільно' };
+  if (total >= 60) return { l: 'E', t: 'задовільно' };
+  if (total >= 35) return { l: 'FX', t: 'незадовільно' };
+  return { l: 'F', t: 'незадовільно' };
+}
+// Колір за часткою від максимуму колонки
+function pctClass(points, max) {
+  if (points === null || points === undefined || !max) return '';
+  const r = points / max;
+  if (r >= 0.85) return 'g-hi';
+  if (r >= 0.6) return 'g-mid';
+  return 'g-lo';
+}
+function fmtPts(n) {
+  if (n === null || n === undefined || n === '') return '';
+  return String(Math.round(Number(n) * 10) / 10).replace('.', ',');
+}
+function normCell(raw) {
+  const x = String(raw).trim().toLowerCase().replace(',', '.');
+  if (x === '') return '';
+  if (/^[hн]$/.test(x)) return 'н';
+  if (/^\d+(\.\d)?$/.test(x)) return String(Number(x)); // '2.0' → '2'
+  return x;
+}
+function validCell(v, lesson) {
+  if (v === '' || v === 'н') return true;
+  if (lesson.kind === 'лекція') return false;
+  return POINTS_RE.test(v) && Number(v) <= Number(lesson.max_points);
+}
+// Скільки балів дає клітинка: лекція з балами = максимум, якщо немає «н» і дата вже настала
+function cellPoints(lesson, value) {
+  if (value === 'н') return 0;
+  if (lesson.kind === 'лекція') return lesson.max_points && lesson.lesson_date <= todayISO() ? Number(lesson.max_points) : null;
+  return value !== undefined && value !== null && value !== '' ? Number(value) : null;
+}
 
 const state = {
   session: null,
@@ -244,24 +285,38 @@ function renderParents() {
   if (!saved) input.focus();
 }
 
-function gradeChip(g, showKind) {
-  return h('div', { class: 'chip-wrap', title: g.kind },
-    h('div', { class: 'g ' + gradeClass(g.value) + (kindInfo(g.kind).control ? ' g-control k-' + kindInfo(g.kind).key : '') }, g.value),
-    h('div', { class: 'chip-date' }, fmtDate(g.date)),
-    showKind ? kindTag(g.kind, 'mini') : null);
+function workChip(w) {
+  const ctrl = kindInfo(w.kind).control;
+  const abs = w.value === 'н';
+  return h('div', { class: 'chip-wrap', title: w.kind + (w.max ? ', максимум ' + fmtPts(w.max) : '') },
+    h('div', { class: 'g ' + (abs ? 'g-abs' : pctClass(w.points, w.max)) + (ctrl ? ' g-control k-' + kindInfo(w.kind).key : '') },
+      abs ? 'н' : fmtPts(w.points), h('span', { class: 'of' }, '/' + fmtPts(w.max))),
+    h('div', { class: 'chip-date' }, fmtDate(w.date)),
+    ctrl ? kindTag(w.kind, 'mini') : null);
 }
 
-function gradeRows(grades) {
-  if (!grades.length) return h('div', { class: 'hint' }, 'Оцінок поки немає.');
-  const current = grades.filter((g) => !kindInfo(g.kind).control);
-  const control = grades.filter((g) => kindInfo(g.kind).control);
+function gradeRows(works) {
+  const lectures = works.filter((w) => w.kind === 'лекція');
+  const current = works.filter((w) => w.kind === 'практична' && w.value !== null && w.value !== undefined);
+  const control = works.filter((w) => kindInfo(w.kind).control && w.value !== null && w.value !== undefined);
+  const lecDone = lectures.filter((w) => w.date <= todayISO());
+  const lecAbs = lecDone.filter((w) => w.value === 'н');
+  const lecPts = lecDone.filter((w) => w.max).reduce((a, w) => a + (w.points || 0), 0);
+  const lecMax = lecDone.filter((w) => w.max).reduce((a, w) => a + Number(w.max), 0);
+  if (!current.length && !control.length && !lecDone.length) return h('div', { class: 'hint' }, 'Оцінок поки немає.');
   return h('div', { class: 'stack', style: 'gap:12px' },
+    lecDone.length ? h('div', { class: 'grade-row' },
+      h('div', { class: 'grade-row-title' }, 'Лекції'),
+      h('div', null,
+        `Проведено ${lecDone.length}, пропущено ${lecAbs.length}`,
+        lecAbs.length ? ' (' + lecAbs.map((w) => fmtDate(w.date)).join(', ') + ')' : '',
+        lecMax ? ` · бали за присутність: ${fmtPts(lecPts)} з ${fmtPts(lecMax)}` : '')) : null,
     current.length ? h('div', { class: 'grade-row' },
-      h('div', { class: 'grade-row-title' }, 'Поточні (лекції, практичні)'),
-      h('div', { class: 'chips' }, current.map((g) => gradeChip(g, false)))) : null,
+      h('div', { class: 'grade-row-title' }, 'Практичні'),
+      h('div', { class: 'chips' }, current.map(workChip))) : null,
     control.length ? h('div', { class: 'grade-row control' },
       h('div', { class: 'grade-row-title' }, 'Контроль (модульні, залікові, екзамен)'),
-      h('div', { class: 'chips' }, control.map((g) => gradeChip(g, true)))) : null);
+      h('div', { class: 'chips' }, control.map(workChip))) : null);
 }
 
 function renderReport(r) {
@@ -278,9 +333,10 @@ function renderReport(r) {
         h('div', { style: 'font-size:20px;font-weight:700' }, r.student),
         h('div', { class: 'sub' }, 'Група ' + r.group))),
     h('div', { class: 'tiles' },
-      h('div', { class: 'tile' }, h('div', { class: 'k' }, 'Середній бал'), h('div', { class: 'v' }, fmtNum(r.avg))),
-      h('div', { class: 'tile' }, h('div', { class: 'k' }, 'Оцінок'), h('div', { class: 'v' }, String(r.grades_count ?? 0))),
+      h('div', { class: 'tile' }, h('div', { class: 'k' }, 'Предметів'), h('div', { class: 'v' }, String(subjects.length))),
+      h('div', { class: 'tile' }, h('div', { class: 'k' }, 'Набрано 60+'), h('div', { class: 'v' }, String(subjects.filter((x) => Number(x.total) >= 60).length))),
       h('div', { class: 'tile' }, h('div', { class: 'k' }, 'Пропуски'), h('div', { class: 'v' }, String(r.absences ?? 0)))),
+    h('div', { class: 'hint' }, 'Рейтингова система: за семестр з кожного предмета можна набрати 100 балів, для зарахування потрібно 60.'),
     r.updated_at ? h('div', { class: 'hint' }, 'Останнє оновлення: ' + fmtDateTime(r.updated_at)) : null,
   );
 
@@ -290,21 +346,24 @@ function renderReport(r) {
         h('div', null,
           h('div', { class: 'subject-name' }, s.subject),
           s.teachers ? h('div', { class: 'hint' }, s.teachers) : null),
-        h('div', { class: 'subject-avg' }, h('div', { class: 'k' }, 'середній'), h('div', { class: 'v' }, fmtNum(s.avg)))),
-      gradeRows(s.grades || []),
+        (() => { const e = ects(Number(s.total)); return h('div', { class: 'subject-avg' },
+          h('div', { class: 'v' }, fmtPts(s.total), h('span', { class: 'of' }, ' з 100')),
+          h('div', { class: 'ects ects-' + e.l }, e.l + ' · ' + e.t)); })()),
+      gradeRows(s.works || []),
       (s.comments || []).map((c) => h('div', { class: 'comment' },
         h('strong', null, 'Коментар викладача (' + fmtDate(c.date) + '): '), c.text)),
     ))
     : [h('div', { class: 'card empty-state' }, 'Оцінок поки немає. Вони з’являться тут одразу, щойно викладачі їх поставлять.')];
 
   const legend = h('div', { class: 'legend' },
-    KINDS.map((k) => h('span', null, kindTag(k.name, 'mini'))),
-    h('span', null, h('span', { class: 'g mini g-hi' }, '10'), '10–12'),
-    h('span', null, h('span', { class: 'g mini g-mid' }, '7'), '7–9'),
-    h('span', null, h('span', { class: 'g mini g-lo' }, '5'), '1–6'),
+    KINDS.filter((k) => k.control).map((k) => h('span', null, kindTag(k.name, 'mini'))),
+    h('span', null, h('span', { class: 'g mini g-hi' }, '2/2'), '85% і більше від максимуму'),
+    h('span', null, h('span', { class: 'g mini g-mid' }, '15'), '60–84%'),
+    h('span', null, h('span', { class: 'g mini g-lo' }, '1'), 'менше 60%'),
     h('span', null, h('span', { class: 'g mini g-abs' }, 'н'), 'пропуск'));
 
-  mount(h('div', { class: 'mid stack' }, h('div', null, back), head, cards, legend));
+  mount(h('div', { class: 'mid stack' }, h('div', null, back), head, cards, legend,
+    h('div', { class: 'hint' }, 'Оцінка ECTS рахується від поточної суми балів; остаточна — наприкінці семестру. Шкала: 90–100 A, 82–89 B, 75–81 C, 68–74 D, 60–67 E, 35–59 FX, менше 35 F.')));
   window.scrollTo(0, 0);
 }
 
@@ -435,7 +494,17 @@ async function renderJournal() {
   const dateIn = h('input', { id: 'nd', class: 'input', type: 'date', value: todayISO() });
   const kindIn = h('select', { id: 'nk', class: 'input', style: 'width:170px' }, KINDS.map((k) => h('option', { value: k.name }, k.name)));
   kindIn.value = load('j.kind') || 'практична';
-  kindIn.addEventListener('change', () => store('j.kind', kindIn.value));
+  const maxIn = h('input', { id: 'nm', class: 'input', type: 'number', min: '0.5', max: '100', step: '0.5', style: 'width:120px' });
+  const maxHint = h('div', { class: 'hint', style: 'max-width:200px' });
+  function syncMax() {
+    const lec = kindIn.value === 'лекція';
+    maxIn.required = !lec;
+    maxIn.placeholder = lec ? 'без балів' : 'напр. 2';
+    maxIn.value = load('j.max.' + kindIn.value) || '';
+    maxHint.textContent = lec ? 'Порожньо — лише присутність. З балами — нараховуються всім, хто без «н».' : '';
+  }
+  syncMax();
+  kindIn.addEventListener('change', () => { store('j.kind', kindIn.value); syncMax(); });
   const addBtn = h('button', { class: 'btn primary', type: 'submit' }, svgIcon(['M12 5v14', 'M5 12h14'], 16, '#fff'), 'Додати колонку');
   const addForm = h('form', {
     class: 'row',
@@ -444,8 +513,12 @@ async function renderJournal() {
       if (!subjectId) return;
       addBtn.disabled = true;
       setStatus('busy', 'Збереження…');
+      const mx = maxIn.value === '' ? null : Number(String(maxIn.value).replace(',', '.'));
+      if (kindIn.value !== 'лекція' && !(mx > 0)) { addBtn.disabled = false; setStatus('err', 'Вкажіть максимум балів для цієї роботи.'); return; }
+      if (mx !== null && (mx > 100 || mx * 2 !== Math.trunc(mx * 2))) { addBtn.disabled = false; setStatus('err', 'Максимум — від 0,5 до 100 з кроком 0,5.'); return; }
+      store('j.max.' + kindIn.value, mx === null ? null : String(mx));
       const { error } = await sb.from('lessons').insert({
-        group_id: groupId, subject_id: subjectId, lesson_date: dateIn.value || todayISO(), kind: kindIn.value,
+        group_id: groupId, subject_id: subjectId, lesson_date: dateIn.value || todayISO(), kind: kindIn.value, max_points: mx,
       });
       addBtn.disabled = false;
       if (error) { setStatus('err', errText(error)); return; }
@@ -455,7 +528,8 @@ async function renderJournal() {
   },
     h('div', { class: 'field' }, h('label', { for: 'nd' }, 'Дата'), dateIn),
     h('div', { class: 'field' }, h('label', { for: 'nk' }, 'Вид роботи'), kindIn),
-    addBtn);
+    h('div', { class: 'field' }, h('label', { for: 'nm' }, 'Макс. балів'), maxIn),
+    addBtn, maxHint);
 
   function setStatus(kind, text) {
     status.className = 'status' + (kind === 'err' ? ' err' : kind === 'busy' ? ' busy' : '');
@@ -469,13 +543,13 @@ async function renderJournal() {
         h('div', { class: 'field' }, h('label', { for: 'js' }, 'Предмет'), subjSel)),
       addForm),
     h('div', { class: 'toolbar' }, h('div', null, titleEl, subEl), status),
-    h('div', { class: 'notice' }, 'Вписуйте оцінку 1–12 або «н» (пропуск); Enter або ↓ — наступний студент. Щоб видалити оцінку, зітріть її. Зміни зберігаються одразу, і батьки бачать їх відразу.'),
+    h('div', { class: 'notice' }, 'Рейтингова система: у кожній колонці — бали від 0 до її максимуму (можна з половинкою: 1,5) або «н» (пропуск). На лекціях ставте лише «н»: присутнім бали нараховуються автоматично. Enter або ↓ — наступний студент. Зміни зберігаються одразу, батьки бачать їх відразу.'),
     tableHost,
     h('div', { class: 'legend' },
       KINDS.map((k) => h('span', null, kindTag(k.name, 'mini'))),
-      h('span', null, h('span', { class: 'g mini g-hi' }, '10'), '10–12'),
-      h('span', null, h('span', { class: 'g mini g-mid' }, '7'), '7–9'),
-      h('span', null, h('span', { class: 'g mini g-lo' }, '5'), '1–6'),
+      h('span', null, h('span', { class: 'g mini g-hi' }, '2'), '85%+ від максимуму'),
+      h('span', null, h('span', { class: 'g mini g-mid' }, '15'), '60–84%'),
+      h('span', null, h('span', { class: 'g mini g-lo' }, '1'), 'менше 60%'),
       h('span', null, h('span', { class: 'g mini g-abs' }, 'н'), 'пропуск')),
   ));
 
@@ -487,7 +561,7 @@ async function renderJournal() {
 
     const [st, ls] = await Promise.all([
       sb.from('students').select('id, full_name').eq('group_id', groupId),
-      sb.from('lessons').select('id, lesson_date, kind').eq('group_id', groupId).eq('subject_id', subjectId)
+      sb.from('lessons').select('id, lesson_date, kind, max_points').eq('group_id', groupId).eq('subject_id', subjectId)
         .order('lesson_date').order('id'),
     ]);
     if (st.error || ls.error) { fill(tableHost, h('div', { class: 'error' }, errText(st.error || ls.error))); return; }
@@ -508,16 +582,16 @@ async function renderJournal() {
     if (!students.length) { fill(tableHost, h('div', { class: 'card empty-state' }, 'У групі немає студентів.')); return; }
 
     const avgCells = new Map();
-    const rowAvg = (sid) => {
-      const vals = lessons.map((l) => gmap.get(l.id + ':' + sid)).filter((v) => v && v !== 'н').map(Number);
-      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-    };
+    const rowTotal = (sid) => lessons.reduce((a, l) => a + (cellPoints(l, gmap.get(l.id + ':' + sid)) || 0), 0);
+    const maxTotal = lessons.reduce((a, l) => a + (l.max_points ? Number(l.max_points) : 0), 0);
+    const totalCell = (sid) => { const t = rowTotal(sid); const e = ects(t); return [fmtPts(t), h('span', { class: 'ects-mini ects-' + e.l }, e.l)]; };
 
     const headRow = h('tr', null,
       h('th', { class: 'name', scope: 'col' }, 'Студент'),
       lessons.map((l) => h('th', { scope: 'col', class: kindInfo(l.kind).control ? 'col-control k-' + kindInfo(l.kind).key : null },
         h('div', { class: 'd' }, fmtDate(l.lesson_date)),
         h('div', null, kindTag(l.kind)),
+        h('div', { class: 'maxp' }, l.max_points ? 'макс ' + fmtPts(l.max_points) : 'присутність'),
         h('button', {
           class: 'col-del', type: 'button', title: 'Видалити колонку', 'aria-label': `Видалити колонку ${fmtDate(l.lesson_date)} ${l.kind}`,
           onclick: async () => {
@@ -530,28 +604,31 @@ async function renderJournal() {
             loadGrid();
           },
         }, '✕ видалити'))),
-      h('th', { scope: 'col' }, 'Середній'),
+      h('th', { scope: 'col' }, h('div', { class: 'd' }, 'Сума'), h('div', { class: maxTotal > 100 ? 'maxp over' : 'maxp' }, 'з ' + fmtPts(maxTotal) + ' розподілених')),
       h('th', { scope: 'col' }, ''));
 
     const inputs = []; // [row][col]
     const body = students.map((s, ri) => {
       inputs[ri] = [];
-      const avgTd = h('td', { class: 'avg' }, fmtNum(rowAvg(s.id)));
+      const avgTd = h('td', { class: 'avg' }, totalCell(s.id));
       avgCells.set(s.id, avgTd);
       return h('tr', null,
         h('td', { class: 'name' }, h('span', { class: 'num' }, String(ri + 1)), s.full_name),
         lessons.map((l, ci) => {
           const key = l.id + ':' + s.id;
           const v = gmap.get(key) || '';
+          const lec = l.kind === 'лекція';
+          const cls = (x) => (x === 'н' ? 'g-abs' : lec ? 'lec' : pctClass(x === '' ? null : Number(x), l.max_points));
           const inp = h('input', {
-            class: 'cell ' + gradeClass(v), value: v, maxlength: '2', inputmode: 'text', autocomplete: 'off',
-            'aria-label': `${s.full_name}, ${fmtDate(l.lesson_date)} ${l.kind}`,
+            class: 'cell ' + cls(v), value: fmtPts(v === 'н' ? '' : v) || (v === 'н' ? 'н' : ''), maxlength: '5', inputmode: lec ? 'text' : 'decimal', autocomplete: 'off',
+            placeholder: lec ? (l.max_points ? '+' + fmtPts(l.max_points) : '+') : '',
+            'aria-label': `${s.full_name}, ${fmtDate(l.lesson_date)} ${l.kind}` + (l.max_points ? `, максимум ${fmtPts(l.max_points)}` : ''),
           });
           inp.dataset.saved = v;
           inp.addEventListener('input', () => {
-            let x = inp.value.trim().toLowerCase().replace(/[hн]/g, 'н');
-            inp.value = x;
-            inp.className = 'cell ' + (x === '' || GRADE_RE.test(x) ? gradeClass(x) : 'bad');
+            const x = normCell(inp.value);
+            if (/[hн]/i.test(inp.value)) inp.value = 'н';
+            inp.className = 'cell ' + (validCell(x, l) ? cls(x) : 'bad');
           });
           inp.addEventListener('keydown', (e) => {
             const go = (r, c) => { const t = inputs[r] && inputs[r][c]; if (t) { e.preventDefault(); t.focus(); t.select(); } };
@@ -559,10 +636,10 @@ async function renderJournal() {
             else if (e.key === 'ArrowUp') go(ri - 1, ci);
             else if (e.key === 'ArrowRight' && inp.selectionStart === inp.value.length) go(ri, ci + 1);
             else if (e.key === 'ArrowLeft' && inp.selectionStart === 0) go(ri, ci - 1);
-            else if (e.key === 'Escape') { inp.value = inp.dataset.saved; inp.dispatchEvent(new Event('input')); }
+            else if (e.key === 'Escape') { inp.value = fmtPts(inp.dataset.saved === 'н' ? '' : inp.dataset.saved) || (inp.dataset.saved === 'н' ? 'н' : ''); inp.dispatchEvent(new Event('input')); }
           });
           inp.addEventListener('focus', () => inp.select());
-          inp.addEventListener('blur', () => saveCell(inp, l.id, s.id, key));
+          inp.addEventListener('blur', () => saveCell(inp, l, s.id, key));
           inputs[ri][ci] = inp;
           return h('td', { class: kindInfo(l.kind).control ? 'col-control k-' + kindInfo(l.kind).key : null }, inp);
         }),
@@ -570,10 +647,16 @@ async function renderJournal() {
         h('td', null, h('button', { class: 'btn small', type: 'button', onclick: () => openComments(s) }, 'Коментар')));
     });
 
-    async function saveCell(inp, lessonId, studentId, key) {
-      const v = inp.value.trim();
+    async function saveCell(inp, lesson, studentId, key) {
+      const lessonId = lesson.id;
+      const v = normCell(inp.value);
       if (v === inp.dataset.saved) return;
-      if (v !== '' && !GRADE_RE.test(v)) { setStatus('err', `«${v}» — недопустима оцінка. Можна 1–12 або «н».`); return; }
+      if (!validCell(v, lesson)) {
+        setStatus('err', lesson.kind === 'лекція'
+          ? 'На лекції ставиться лише «н». Присутнім бали нараховуються автоматично.'
+          : `«${inp.value}» — недопустимо. Можна від 0 до ${fmtPts(lesson.max_points)} (крок 0,5) або «н».`);
+        return;
+      }
       setStatus('busy', 'Збереження…');
       const res = v === ''
         ? await sb.from('grades').delete().eq('lesson_id', lessonId).eq('student_id', studentId)
@@ -585,10 +668,11 @@ async function renderJournal() {
       }
       inp.dataset.saved = v;
       if (v === '') gmap.delete(key); else gmap.set(key, v);
-      avgCells.get(studentId).textContent = fmtNum(rowAvg(studentId));
+      fill(avgCells.get(studentId), totalCell(studentId));
       setStatus('ok', 'Усі зміни збережено');
     }
 
+    if (maxTotal > 100) setStatus('err', `Увага: у колонках розподілено ${fmtPts(maxTotal)} балів — більше за 100.`);
     const table = h('table', { class: 'journal' }, h('thead', null, headRow), h('tbody', null, body));
     fill(tableHost, 
       lessons.length ? null : h('div', { class: 'notice', style: 'margin-bottom:12px' }, 'Колонок ще немає. Додайте першу: оберіть дату й вид роботи вгорі та натисніть «Додати колонку».'),
