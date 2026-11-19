@@ -227,3 +227,38 @@ dialog .card { box-shadow: none; }
 .group-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; max-height: 300px; overflow-y: auto; padding: 4px 2px; }
 .group-checks .checkbox { min-height: 32px; }
 .group-checks .checkbox.done { color: var(--muted); }
+
+/* Журнал: дії в заголовку колонки */
+.col-actions { display: flex; gap: 2px; justify-content: center; margin-top: 4px; flex-wrap: wrap; }
+.col-act { background: none; border: 0; color: #1D4AA8; cursor: pointer; font-size: 11px; font-weight: 600; padding: 2px 4px; border-radius: 6px; }
+.col-act:hover { background: var(--accent-soft); }
+.of-total { font-size: 12px; font-weight: 600; color: var(--muted); }
+.journal tfoot td { background: #FAFBFC; font-size: 13px; font-weight: 600; border-top: 2px solid var(--line); border-bottom: 0; }
+.journal tfoot td.name { background: #FAFBFC; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 12px; }
+.journal tfoot td.col-control { background: var(--k-tint); }
+
+/* Згорнута підказка */
+.help { background: var(--accent-soft); color: #1E3A72; border-radius: 10px; padding: 10px 14px; font-size: 14px; flex: 1; min-width: 260px; }
+.help summary { cursor: pointer; font-weight: 600; }
+.help ul { margin: 8px 0 2px; padding-left: 20px; }
+.help li { margin: 3px 0; }
+
+/* Семестри для батьків */
+.sem-switch { display: flex; flex-wrap: wrap; gap: 8px; }
+.sem-switch .btn.active { background: var(--text); color: #fff; border-color: var(--text); }
+
+/* Телефон */
+@media (max-width: 700px) {
+  .row .field { flex: 1 1 100%; }
+  .row .input, .row select.input { min-width: 0 !important; width: 100% !important; }
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .journal .name { min-width: 150px; font-size: 14px; padding-left: 10px; }
+  .journal .num { display: none; }
+  .journal th, .journal td { padding: 4px 3px; }
+  .cell { width: 48px; height: 40px; }
+  .journal .avg { min-width: 90px; font-size: 14px; }
+  .nav { width: 100%; margin-left: 0; justify-content: flex-start; }
+  .tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .tab { white-space: nowrap; }
+  dialog .row .field { flex: 1 1 100%; }
+}
