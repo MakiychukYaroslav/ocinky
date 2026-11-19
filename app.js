@@ -1099,43 +1099,116 @@ async function adminTeachers(host) {
     // Спочатку адміністратори, далі решта — за прізвищем
     const teachers = (data || []).sort((a, b) => (Number(b.is_admin) - Number(a.is_admin)) || byName(a, b));
     const tbody = h('tbody', null, teachers.map((t) => {
-          const mine = state.assignments.filter((a) => a.teacher_id === t.id)
-            .sort((a, b) => (subjectName(a.subject_id) + groupName(a.group_id)).localeCompare(subjectName(b.subject_id) + groupName(b.group_id), 'uk'));
-          const g2 = h('select', { class: 'input', 'aria-label': 'Група' }, state.groups.map((g) => h('option', { value: g.id }, g.name)));
-          const s2 = h('select', { class: 'input', 'aria-label': 'Предмет' }, state.subjects.map((s) => h('option', { value: s.id }, s.name)));
-          const searchText = [t.full_name, t.email, t.is_admin ? 'адмін адміністратор' : '',
-            ...mine.map((a) => subjectName(a.subject_id) + ' ' + groupName(a.group_id))].join(' ');
-          return h('tr', { 'data-search': normSearch(searchText) },
-            h('td', null, h('div', { style: 'font-weight:600' }, t.full_name, t.is_admin ? h('span', { class: 'badge' }, 'адмін') : null),
-              h('div', { class: 'hint' }, t.email || '')),
-            h('td', null, mine.length ? mine.map((a) => h('span', { class: 'pill' }, `${subjectName(a.subject_id)} — ${groupName(a.group_id)}`,
-              h('button', {
-                type: 'button', 'aria-label': 'Прибрати призначення',
-                onclick: async () => {
-                  const { error: de } = await sb.from('teacher_assignments').delete()
-                    .eq('teacher_id', t.id).eq('group_id', a.group_id).eq('subject_id', a.subject_id);
-                  if (de) { fill(msg, h('div', { class: 'error' }, errText(de))); return; }
-                  await loadRefs(); loadList();
-                },
-              }, '✕'))) : h('span', { class: 'hint' }, t.is_admin ? 'Адміністратор має доступ до всіх груп' : 'Нічого не закріплено')),
-            h('td', null, h('div', { class: 'row', style: 'flex-wrap:nowrap' }, s2, g2,
-              h('button', {
-                class: 'btn small', type: 'button',
-                onclick: async () => {
-                  const { error: ie } = await sb.from('teacher_assignments')
-                    .upsert({ teacher_id: t.id, group_id: Number(g2.value), subject_id: Number(s2.value) }, { ignoreDuplicates: true });
-                  if (ie) { fill(msg, h('div', { class: 'error' }, errText(ie))); return; }
-                  await loadRefs(); loadList();
-                },
-              }, 'Закріпити'))));
-        }));
+      const mine = state.assignments.filter((a) => a.teacher_id === t.id);
+      const grouped = groupAssignments(mine);
+      const searchText = [t.full_name, t.email, t.is_admin ? 'адмін адміністратор' : '',
+        ...mine.map((a) => subjectName(a.subject_id) + ' ' + groupName(a.group_id))].join(' ');
+      return h('tr', { 'data-search': normSearch(searchText) },
+        h('td', { style: 'min-width:220px' }, h('div', { style: 'font-weight:600' }, t.full_name, t.is_admin ? h('span', { class: 'badge' }, 'адмін') : null),
+          h('div', { class: 'hint' }, t.email || '')),
+        h('td', null, grouped.length
+          ? grouped.map(([subj, gs]) => h('div', { class: 'assign-line' }, h('strong', null, subj + ': '), gs.map((g) => shortGroup(groupName(g))).join(', ')))
+          : h('span', { class: 'hint' }, t.is_admin ? 'Адміністратор має доступ до всіх груп' : 'Нічого не закріплено')),
+        h('td', { style: 'text-align:right' }, h('button', {
+          class: 'btn small', type: 'button', onclick: () => openAssignDialog(t),
+        }, mine.length ? 'Змінити' : 'Закріпити предмети')));
+    }));
     fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
       h('table', { class: 'list' },
-        h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Предмети й групи'), h('th', null, 'Додати'))),
+        h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Предмети й групи'), h('th', null, ''))),
         tbody)));
     tSearch.attach(tbody);
   }
+
+  // Модальне вікно: предмети й групи викладача
+  function openAssignDialog(t) {
+    const listBox = h('div', { class: 'stack', style: 'gap:8px' });
+    const subjSel = h('select', { id: 'ad-s', class: 'input' }, state.subjects.map((s) => h('option', { value: s.id }, s.name)));
+    const groupsBox = h('div', { class: 'group-checks' });
+    const msgBox = h('div');
+    const saveBtn = h('button', { class: 'btn primary', type: 'submit' }, 'Закріпити вибрані групи');
+    let changed = false;
+
+    const current = () => state.assignments.filter((a) => a.teacher_id === t.id);
+
+    function drawCurrent() {
+      const grouped = groupAssignments(current());
+      fill(listBox, grouped.length
+        ? grouped.map(([subj, gs]) => h('div', { class: 'assign-block' },
+          h('div', { style: 'font-weight:600' }, subj),
+          h('div', null, gs.map((gid) => h('span', { class: 'pill' }, shortGroup(groupName(gid)),
+            h('button', {
+              type: 'button', 'aria-label': `Прибрати ${subj} — ${groupName(gid)}`,
+              onclick: async () => {
+                const sid = state.subjects.find((x) => x.name === subj).id;
+                const { error } = await sb.from('teacher_assignments').delete().eq('teacher_id', t.id).eq('group_id', gid).eq('subject_id', sid);
+                if (error) { fill(msgBox, h('div', { class: 'error' }, errText(error))); return; }
+                changed = true; await loadRefs(); drawCurrent(); drawGroups();
+              },
+            }, '✕'))))))
+        : h('div', { class: 'hint' }, 'Поки нічого не закріплено.'));
+    }
+
+    function drawGroups() {
+      const sid = Number(subjSel.value);
+      const have = new Set(current().filter((a) => a.subject_id === sid).map((a) => a.group_id));
+      fill(groupsBox, state.groups.map((g) => {
+        const cb = h('input', { type: 'checkbox', value: g.id, checked: have.has(g.id), disabled: have.has(g.id) });
+        return h('label', { class: 'checkbox' + (have.has(g.id) ? ' done' : '') }, cb, shortGroup(g.name), have.has(g.id) ? h('span', { class: 'hint' }, ' (вже є)') : null);
+      }));
+    }
+    subjSel.addEventListener('change', drawGroups);
+    if (current().length) subjSel.value = String(current()[0].subject_id); // одразу предмет викладача
+
+    const dlg = h('dialog', { style: 'width:min(720px, calc(100vw - 32px))' },
+      h('form', {
+        class: 'card stack', method: 'dialog',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const sid = Number(subjSel.value);
+          const picked = [...groupsBox.querySelectorAll('input:checked:not(:disabled)')].map((x) => Number(x.value));
+          if (!picked.length) { fill(msgBox, h('div', { class: 'error' }, 'Позначте хоча б одну групу.')); return; }
+          saveBtn.disabled = true;
+          const { error } = await sb.from('teacher_assignments')
+            .upsert(picked.map((gid) => ({ teacher_id: t.id, group_id: gid, subject_id: sid })), { ignoreDuplicates: true });
+          saveBtn.disabled = false;
+          if (error) { fill(msgBox, h('div', { class: 'error' }, errText(error))); return; }
+          changed = true;
+          fill(msgBox, h('div', { class: 'success' }, `Закріплено: ${subjectName(sid)} — ${picked.length} груп.`));
+          await loadRefs(); drawCurrent(); drawGroups();
+        },
+      },
+        h('div', { class: 'row', style: 'justify-content:space-between;align-items:flex-start' },
+          h('div', null, h('h2', { style: 'font-size:18px' }, t.full_name), h('div', { class: 'hint' }, t.email || '')),
+          h('button', { class: 'btn small', type: 'button', onclick: () => dlg.close() }, 'Закрити')),
+        h('div', { class: 'label' }, 'Закріплені предмети й групи'),
+        listBox,
+        h('hr', { style: 'border:0;border-top:1px solid var(--line);margin:4px 0' }),
+        h('div', { class: 'label' }, 'Додати'),
+        h('div', { class: 'field' }, h('label', { for: 'ad-s' }, 'Предмет'), subjSel),
+        h('div', { class: 'field' }, h('span', { class: 'label' }, 'Групи'), groupsBox),
+        msgBox,
+        h('div', { class: 'row', style: 'justify-content:flex-end' }, saveBtn)));
+    dlg.addEventListener('close', () => { dlg.remove(); if (changed) loadList(); });
+    document.body.append(dlg);
+    drawCurrent(); drawGroups();
+    dlg.showModal();
+  }
+
   loadList();
+}
+
+function shortGroup(name) { return String(name).replace(/^АФК-9-/, ''); }
+// [[назва предмета, [group_id…]], …] за абеткою
+function groupAssignments(list) {
+  const m = new Map();
+  for (const a of list) {
+    const subj = subjectName(a.subject_id);
+    if (!m.has(subj)) m.set(subj, []);
+    m.get(subj).push(a.group_id);
+  }
+  return [...m.entries()].sort((x, y) => x[0].localeCompare(y[0], 'uk'))
+    .map(([subj, gs]) => [subj, gs.sort((x, y) => groupName(x).localeCompare(groupName(y), 'uk'))]);
 }
 
 async function adminSubjects(host) {
