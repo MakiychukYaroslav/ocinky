@@ -479,6 +479,39 @@ async function renderJournal() {
   const status = h('div', { class: 'status', role: 'status' });
   const tableHost = h('div');
   const titleEl = h('h1', { class: 'page-title' });
+
+  // Пошук студента в журналі: підсвічує й прокручує до рядка, інших не приховує
+  let gridRows = []; // [{ tr, search, inputs }]
+  let found = [];
+  let foundIdx = 0;
+  const jSearch = h('input', { id: 'jsr', class: 'input', type: 'search', placeholder: 'Прізвище або ім’я', autocomplete: 'off', style: 'width:240px' });
+  const jSearchInfo = h('div', { class: 'hint' });
+  function highlight(scroll) {
+    gridRows.forEach((r) => r.tr.classList.remove('found', 'found-current'));
+    const words = normSearch(jSearch.value).split(' ').filter(Boolean);
+    found = words.length ? gridRows.filter((r) => words.every((w) => r.search.includes(w))) : [];
+    if (foundIdx >= found.length) foundIdx = 0;
+    found.forEach((r, i) => r.tr.classList.add(i === foundIdx ? 'found-current' : 'found'));
+    jSearchInfo.textContent = !words.length ? 'Enter — перейти до оцінки'
+      : !found.length ? 'Нічого не знайдено'
+      : found.length === 1 ? 'Enter — перейти до оцінки' : `Знайдено ${found.length}: Enter — до оцінки, ↓ — наступний`;
+    if (scroll && found.length) found[foundIdx].tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  jSearch.addEventListener('input', () => { foundIdx = 0; highlight(true); });
+  jSearch.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { jSearch.value = ''; highlight(false); return; }
+    if (!found.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      foundIdx = (foundIdx + (e.key === 'ArrowDown' ? 1 : found.length - 1)) % found.length;
+      highlight(true);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const inputs = found[foundIdx].inputs;
+      const target = inputs[inputs.length - 1];
+      if (target) { target.focus(); target.select(); }
+    }
+  });
   const subEl = h('div', { class: 'sub' });
 
   function fillSubjects() {
@@ -545,7 +578,10 @@ async function renderJournal() {
         h('div', { class: 'field' }, h('label', { for: 'jg' }, 'Група'), groupSel),
         h('div', { class: 'field' }, h('label', { for: 'js' }, 'Предмет'), subjSel)),
       addForm),
-    h('div', { class: 'toolbar' }, h('div', null, titleEl, subEl), status),
+    h('div', { class: 'toolbar' }, h('div', null, titleEl, subEl),
+      h('div', { class: 'row', style: 'align-items:flex-end' },
+        status,
+        h('div', { class: 'field' }, h('label', { for: 'jsr' }, 'Знайти студента'), jSearch, jSearchInfo))),
     h('div', { class: 'notice' }, 'У клітинку ставте: «н» — не було, «п» — присутній (0 балів), або бали від 0 до максимуму колонки (можна 1,5). У колонці без балів — лише «н» або «п». Enter або ↓ — наступний студент. Зміни зберігаються одразу, батьки бачать їх відразу.'),
     tableHost,
     h('div', { class: 'legend' },
@@ -612,11 +648,12 @@ async function renderJournal() {
       h('th', { scope: 'col' }, ''));
 
     const inputs = []; // [row][col]
+    gridRows = [];
     const body = students.map((s, ri) => {
       inputs[ri] = [];
       const avgTd = h('td', { class: 'avg' }, totalCell(s.id));
       avgCells.set(s.id, avgTd);
-      return h('tr', null,
+      const tr = h('tr', null,
         h('td', { class: 'name' }, h('span', { class: 'num' }, String(ri + 1)), s.full_name),
         lessons.map((l, ci) => {
           const key = l.id + ':' + s.id;
@@ -648,6 +685,8 @@ async function renderJournal() {
         }),
         avgTd,
         h('td', null, h('button', { class: 'btn small', type: 'button', onclick: () => openComments(s) }, 'Коментар')));
+      gridRows.push({ tr, search: normSearch(s.full_name), inputs: inputs[ri] });
+      return tr;
     });
 
     async function saveCell(inp, lesson, studentId, key) {
@@ -677,6 +716,7 @@ async function renderJournal() {
 
     if (maxTotal > 100) setStatus('err', `Увага: у колонках розподілено ${fmtPts(maxTotal)} балів — більше за 100.`);
     const table = h('table', { class: 'journal' }, h('thead', null, headRow), h('tbody', null, body));
+    setTimeout(() => highlight(false), 0);
     fill(tableHost, 
       lessons.length ? null : h('div', { class: 'notice', style: 'margin-bottom:12px' }, 'Колонок ще немає. Додайте першу: оберіть дату й вид роботи вгорі та натисніть «Додати колонку».'),
       h('div', { class: 'table-box' }, table));

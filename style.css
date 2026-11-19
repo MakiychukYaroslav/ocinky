@@ -215,3 +215,8 @@ dialog .card { box-shadow: none; }
 .cell::placeholder { color: #A3A9B5; font-weight: 600; }
 .cell.lec { background: #FAFBFC; }
 .g-pres, .cell.g-pres { background: #E7F5EC; color: #0F6B3E; border-color: transparent; }
+
+/* Пошук студента в журналі */
+.journal tr.found td, .journal tr.found td.name { background: #FFF8DB; }
+.journal tr.found-current td, .journal tr.found-current td.name { background: #FFEFA8; }
+.journal tr.found-current td.name { box-shadow: inset 4px 0 0 #C99400; }
