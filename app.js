@@ -1225,9 +1225,80 @@ async function adminTeachers(host) {
 
   const pendingHost = h('div');
   const tSearch = makeSearch('tsr', 'Пошук викладача', 'Прізвище, ім’я, пошта, предмет або група');
+  const resetBtn = h('button', { class: 'btn', type: 'button', onclick: () => openResetDialog() }, 'Нові тимчасові паролі…');
   fill(host, h('div', { class: 'stack' }, pendingHost, form,
-    h('h2', { style: 'font-size:18px;margin-top:8px' }, 'Викладачі'), tSearch.box, listHost));
+    h('div', { class: 'row', style: 'justify-content:space-between;align-items:center;margin-top:8px' },
+      h('h2', { style: 'font-size:18px' }, 'Викладачі'), resetBtn),
+    tSearch.box, listHost));
   loadPending();
+
+  // Нові тимчасові паролі для вибраних викладачів (якщо паролі загубились або хтось забув свій)
+  async function openResetDialog() {
+    const body = h('div', { class: 'stack' }, h('div', { class: 'hint' }, 'Завантаження…'));
+    const msgBox = h('div');
+    const goBtn = h('button', { class: 'btn primary', type: 'button' }, 'Згенерувати нові паролі');
+    const dlg = h('dialog', { style: 'width:min(860px, calc(100vw - 32px))' }, h('div', { class: 'card stack' },
+      h('div', { class: 'row', style: 'justify-content:space-between;align-items:flex-start' },
+        h('div', null, h('h2', { style: 'font-size:18px' }, 'Нові тимчасові паролі'),
+          h('div', { class: 'hint' }, 'Старий пароль вибраних викладачів перестане діяти. Нові паролі буде показано один раз — одразу роздрукуйте або скопіюйте їх.')),
+        h('button', { class: 'btn small', type: 'button', onclick: () => dlg.close() }, 'Закрити')),
+      body, msgBox, h('div', { class: 'row', style: 'justify-content:flex-end' }, goBtn)));
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.append(dlg);
+    dlg.showModal();
+
+    const invoke = async (payload) => {
+      const { data, error } = await sb.functions.invoke('reset-teacher-passwords', { body: payload });
+      if (error) { let m = error.message; try { const b = await error.context.json(); m = b.error || m; } catch (x) { /* ignore */ } throw new Error(m); }
+      if (data && data.error) throw new Error(data.error);
+      return data;
+    };
+
+    let list = [];
+    try { list = (await invoke({ action: 'list' })).teachers || []; }
+    catch (e) { fill(body, h('div', { class: 'error' }, e.message)); return; }
+    list.sort((a, b) => (Number(a.is_admin) - Number(b.is_admin)) || byName(a, b));
+    const today = todayISO();
+    void today;
+    const boxes = new Map();
+    const rows = list.filter((t) => t.id !== state.me.id).map((t) => {
+      const cb = h('input', { type: 'checkbox', 'aria-label': t.full_name });
+      boxes.set(t.id, { cb, t });
+      return h('tr', null,
+        h('td', null, cb),
+        h('td', null, h('div', { style: 'font-weight:600' }, t.full_name, t.is_admin ? h('span', { class: 'badge' }, 'адмін') : null), h('div', { class: 'hint' }, t.email || '')),
+        h('td', null, t.created_at ? fmtDateTime(t.created_at) : '—'),
+        h('td', null, t.last_sign_in_at ? fmtDateTime(t.last_sign_in_at) : h('span', { class: 'hint' }, 'ще не входив(ла)')));
+    });
+    const pick = (fn) => boxes.forEach(({ cb, t }) => { cb.checked = fn(t); });
+    const count = () => [...boxes.values()].filter((x) => x.cb.checked).length;
+    const sync = () => { goBtn.textContent = `Згенерувати нові паролі (${count()})`; goBtn.disabled = !count(); };
+    fill(body,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn small', type: 'button', onclick: () => { pick((t) => !t.is_admin && !t.last_sign_in_at); sync(); } }, 'Ще не входили'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => { pick((t) => !t.is_admin && !t.last_sign_in_at && t.created_at && Date.now() - new Date(t.created_at).getTime() < 2 * 3600 * 1000); sync(); } }, 'Створені за останні 2 години'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => { pick((t) => !t.is_admin && String(t.created_at || '').slice(0, 10) === today); sync(); } }, 'Створені сьогодні'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => { pick(() => false); sync(); } }, 'Зняти всі')),
+      h('div', { style: 'overflow:auto;max-height:50vh' }, h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'Викладач'), h('th', null, 'Акаунт створено'), h('th', null, 'Останній вхід'))),
+        h('tbody', { onchange: sync }, rows))));
+    sync();
+
+    goBtn.addEventListener('click', async () => {
+      const ids = [...boxes.values()].filter((x) => x.cb.checked).map((x) => x.t.id);
+      if (!ids.length) return;
+      if (!confirm(`Згенерувати нові паролі для ${ids.length} викладачів? Їхні поточні паролі перестануть діяти.`)) return;
+      goBtn.disabled = true; goBtn.textContent = 'Генерація…';
+      try {
+        const res = await invoke({ action: 'reset', ids });
+        dlg.close();
+        showCreated(res.results || [], 'Нові паролі встановлено');
+        window.scrollTo(0, 0);
+      } catch (e) {
+        fill(msgBox, h('div', { class: 'error' }, e.message)); sync();
+      }
+    });
+  }
 
   // Викладачі, внесені в реєстр, але ще без акаунта
   async function loadPending() {
@@ -1284,13 +1355,13 @@ async function adminTeachers(host) {
       out));
   }
 
-  function showCreated(results) {
+  function showCreated(results, title) {
     const ok = results.filter((r) => r.password);
     const bad = results.filter((r) => r.error);
     const url = location.origin + location.pathname;
     const asText = ok.map((r) => `${r.full_name}\nСайт: ${url}\nПошта: ${r.email}\nТимчасовий пароль: ${r.password}\n`).join('\n');
     fill(pendingHost, h('div', { class: 'card stack' },
-      h('h2', { style: 'font-size:18px' }, `Створено акаунтів: ${ok.length}`),
+      h('h2', { style: 'font-size:18px' }, `${title || 'Створено акаунтів'}: ${ok.length}`),
       h('div', { class: 'error' }, 'Паролі показано лише зараз. Роздрукуйте або скопіюйте їх, перш ніж закрити сторінку.'),
       h('div', { class: 'row' },
         h('button', {
@@ -1317,7 +1388,7 @@ async function adminTeachers(host) {
         }, 'Скопіювати як текст')),
       h('div', { style: 'overflow-x:auto' }, h('table', { class: 'list' },
         h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Пошта'), h('th', null, 'Тимчасовий пароль'), h('th', null, 'Призначень'))),
-        h('tbody', null, ok.map((r) => h('tr', null, h('td', null, r.full_name), h('td', null, r.email), h('td', { class: 'mono' }, r.password), h('td', null, String(r.assignments))))))),
+        h('tbody', null, ok.map((r) => h('tr', null, h('td', null, r.full_name), h('td', null, r.email), h('td', { class: 'mono' }, r.password), h('td', null, r.assignments === undefined ? '—' : String(r.assignments))))))),
       bad.length ? h('div', { class: 'error' }, 'Не вдалося: ', bad.map((r) => `${r.full_name} (${r.email}) — ${r.error}`).join('; ')) : null));
   }
 
