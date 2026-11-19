@@ -767,6 +767,28 @@ async function renderAdmin() {
   show();
 }
 
+// Пошук по рядках таблиці: кожен рядок має data-search (текст у нижньому регістрі)
+function normSearch(x) { return String(x || '').toLowerCase().replace(/[’ʼ`]/g, "'").replace(/\s+/g, ' '); }
+function makeSearch(id, label, placeholder) {
+  const input = h('input', { id, class: 'input', type: 'search', placeholder, autocomplete: 'off', style: 'min-width:280px' });
+  const count = h('div', { class: 'hint' });
+  let tbody = null;
+  function apply() {
+    if (!tbody) return;
+    const words = normSearch(input.value).split(' ').filter(Boolean);
+    let shown = 0;
+    for (const tr of tbody.rows) {
+      const ok = words.every((w) => (tr.dataset.search || '').includes(w));
+      tr.classList.toggle('hidden', !ok);
+      if (ok) shown++;
+    }
+    count.textContent = words.length ? (shown ? `Знайдено: ${shown} з ${tbody.rows.length}` : 'Нічого не знайдено') : '';
+  }
+  input.addEventListener('input', apply);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.value = ''; apply(); } });
+  return { box: h('div', { class: 'field' }, h('label', { for: id }, label), input, count), attach(tb) { tbody = tb; apply(); } };
+}
+
 function groupSelect(id, onChange, storeKey) {
   const sel = h('select', { id, class: 'input', style: 'min-width:260px' }, state.groups.map((g) => h('option', { value: g.id }, g.name)));
   const saved = Number(load(storeKey));
@@ -780,8 +802,10 @@ async function adminCodes(host) {
   let rows = [];
   const sel = groupSelect('cg', (gid) => loadCodes(gid), 'a.group');
   const printBtn = h('button', { class: 'btn primary', type: 'button', onclick: () => printSlips() }, 'Друкувати аркуш з кодами');
+  const search = makeSearch('cs', 'Пошук студента', 'Прізвище або ім’я');
   fill(host, h('div', { class: 'stack' },
-    h('div', { class: 'row' }, h('div', { class: 'field' }, h('label', { for: 'cg' }, 'Група'), sel), printBtn),
+    h('div', { class: 'row', style: 'align-items:flex-start' }, h('div', { class: 'field' }, h('label', { for: 'cg' }, 'Група'), sel), search.box,
+      h('div', { class: 'field' }, h('span', { class: 'label' }, '\u00a0'), printBtn)),
     h('div', { class: 'notice' }, 'Аркуш друкується по 2 картки в ряд: розріжте й роздайте студентам для батьків. Кожен код відкриває оцінки лише однієї дитини.'),
     tableHost));
 
@@ -793,10 +817,13 @@ async function adminCodes(host) {
       name: s.full_name,
       code: Array.isArray(s.parent_codes) ? (s.parent_codes[0] || {}).code : (s.parent_codes || {}).code,
     }));
+    const tbody = h('tbody', null, rows.map((r, i) => h('tr', { 'data-search': normSearch(r.name + ' ' + (r.code || '')) },
+      h('td', null, String(i + 1)), h('td', null, r.name), h('td', { class: 'mono' }, r.code || '—'))));
     fill(tableHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
       h('table', { class: 'list' },
         h('thead', null, h('tr', null, h('th', null, '№'), h('th', null, 'Студент'), h('th', null, 'Код для батьків'))),
-        h('tbody', null, rows.map((r, i) => h('tr', null, h('td', null, String(i + 1)), h('td', null, r.name), h('td', { class: 'mono' }, r.code || '—')))))));
+        tbody)));
+    search.attach(tbody);
   }
 
   function printSlips() {
@@ -821,8 +848,9 @@ async function adminStudents(host) {
   const sel = groupSelect('sg', (gid) => loadList(gid), 'a.group');
   const nameIn = h('input', { id: 'sn', class: 'input', placeholder: 'Прізвище Ім’я По батькові', style: 'min-width:320px' });
   const msg = h('div');
+  const search = makeSearch('ss', 'Пошук студента', 'Прізвище або ім’я');
   fill(host, h('div', { class: 'stack' },
-    h('div', { class: 'row' }, h('div', { class: 'field' }, h('label', { for: 'sg' }, 'Група'), sel)),
+    h('div', { class: 'row', style: 'align-items:flex-start' }, h('div', { class: 'field' }, h('label', { for: 'sg' }, 'Група'), sel), search.box),
     h('form', {
       class: 'card row',
       onsubmit: async (e) => {
@@ -845,10 +873,7 @@ async function adminStudents(host) {
     const { data, error } = await sb.from('students').select('id, full_name').eq('group_id', gid);
     if (error) { fill(listHost, h('div', { class: 'error' }, errText(error))); return; }
     const rows = (data || []).sort(byName);
-    fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
-      h('table', { class: 'list' },
-        h('thead', null, h('tr', null, h('th', null, '№'), h('th', null, 'Студент'), h('th', null, ''))),
-        h('tbody', null, rows.map((s, i) => h('tr', null,
+    const tbody = h('tbody', null, rows.map((s, i) => h('tr', { 'data-search': normSearch(s.full_name) },
           h('td', null, String(i + 1)), h('td', null, s.full_name),
           h('td', { style: 'text-align:right' }, h('button', {
             class: 'btn small danger', type: 'button',
@@ -858,7 +883,12 @@ async function adminStudents(host) {
               if (de) { fill(msg, h('div', { class: 'error' }, errText(de))); return; }
               loadList(gid);
             },
-          }, 'Видалити'))))))));
+          }, 'Видалити')))));
+    fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
+      h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, '№'), h('th', null, 'Студент'), h('th', null, ''))),
+        tbody)));
+    search.attach(tbody);
   }
   loadList(Number(sel.value));
 }
@@ -926,7 +956,9 @@ async function adminTeachers(host) {
     msg);
 
   const pendingHost = h('div');
-  fill(host, h('div', { class: 'stack' }, pendingHost, form, listHost));
+  const tSearch = makeSearch('tsr', 'Пошук викладача', 'Прізвище, ім’я, пошта, предмет або група');
+  fill(host, h('div', { class: 'stack' }, pendingHost, form,
+    h('h2', { style: 'font-size:18px;margin-top:8px' }, 'Викладачі'), tSearch.box, listHost));
   loadPending();
 
   // Викладачі, внесені в реєстр, але ще без акаунта
@@ -1024,16 +1056,16 @@ async function adminTeachers(host) {
   async function loadList() {
     const { data, error } = await sb.from('teachers').select('id, full_name, email, is_admin');
     if (error) { fill(listHost, h('div', { class: 'error' }, errText(error))); return; }
-    const teachers = (data || []).sort(byName);
-    fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
-      h('table', { class: 'list' },
-        h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Предмети й групи'), h('th', null, 'Додати'))),
-        h('tbody', null, teachers.map((t) => {
+    // Спочатку адміністратори, далі решта — за прізвищем
+    const teachers = (data || []).sort((a, b) => (Number(b.is_admin) - Number(a.is_admin)) || byName(a, b));
+    const tbody = h('tbody', null, teachers.map((t) => {
           const mine = state.assignments.filter((a) => a.teacher_id === t.id)
             .sort((a, b) => (subjectName(a.subject_id) + groupName(a.group_id)).localeCompare(subjectName(b.subject_id) + groupName(b.group_id), 'uk'));
           const g2 = h('select', { class: 'input', 'aria-label': 'Група' }, state.groups.map((g) => h('option', { value: g.id }, g.name)));
           const s2 = h('select', { class: 'input', 'aria-label': 'Предмет' }, state.subjects.map((s) => h('option', { value: s.id }, s.name)));
-          return h('tr', null,
+          const searchText = [t.full_name, t.email, t.is_admin ? 'адмін адміністратор' : '',
+            ...mine.map((a) => subjectName(a.subject_id) + ' ' + groupName(a.group_id))].join(' ');
+          return h('tr', { 'data-search': normSearch(searchText) },
             h('td', null, h('div', { style: 'font-weight:600' }, t.full_name, t.is_admin ? h('span', { class: 'badge' }, 'адмін') : null),
               h('div', { class: 'hint' }, t.email || '')),
             h('td', null, mine.length ? mine.map((a) => h('span', { class: 'pill' }, `${subjectName(a.subject_id)} — ${groupName(a.group_id)}`,
@@ -1056,7 +1088,12 @@ async function adminTeachers(host) {
                   await loadRefs(); loadList();
                 },
               }, 'Закріпити'))));
-        })))));
+        }));
+    fill(listHost, h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
+      h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Предмети й групи'), h('th', null, 'Додати'))),
+        tbody)));
+    tSearch.attach(tbody);
   }
   loadList();
 }
