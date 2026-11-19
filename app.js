@@ -1212,32 +1212,139 @@ function groupAssignments(list) {
 }
 
 async function adminSubjects(host) {
-  const sIn = h('input', { id: 'nsub', class: 'input', placeholder: 'Назва предмета', style: 'min-width:320px' });
-  const gIn = h('input', { id: 'ngr', class: 'input', placeholder: 'АФК-9-26-К1ХХ(3.0д)', style: 'min-width:260px' });
   const msg = h('div');
-  const addTo = (table, input, label) => h('form', {
-    class: 'card row',
-    onsubmit: async (e) => {
-      e.preventDefault();
-      const name = input.value.trim();
-      if (!name) return;
-      const { error } = await sb.from(table).insert({ name });
-      if (error) { fill(msg, h('div', { class: 'error' }, /duplicate/i.test(error.message) ? 'Така назва вже є.' : errText(error))); return; }
-      input.value = '';
-      fill(msg, h('div', { class: 'success' }, 'Додано.'));
-      await loadRefs(); draw();
-    },
-  }, h('div', { class: 'field', style: 'flex:1' }, h('label', { for: input.id }, label), input), h('button', { class: 'btn primary', type: 'submit' }, 'Додати'));
-
   const lists = h('div', { class: 'row', style: 'align-items:flex-start' });
-  function draw() {
-    fill(lists, 
-      h('div', { class: 'card', style: 'flex:1;min-width:280px' }, h('h2', { style: 'font-size:16px;margin-bottom:8px' }, `Предмети (${state.subjects.length})`),
-        h('ul', { style: 'margin:0;padding-left:18px' }, state.subjects.map((s) => h('li', null, s.name)))),
-      h('div', { class: 'card', style: 'flex:1;min-width:280px' }, h('h2', { style: 'font-size:16px;margin-bottom:8px' }, `Групи (${state.groups.length})`),
-        h('ul', { style: 'margin:0;padding-left:18px' }, state.groups.map((g) => h('li', null, g.name)))));
+  let usage = { students: new Map(), lessonsByGroup: new Map(), lessonsBySubject: new Map(), teachersByGroup: new Map(), teachersBySubject: new Map() };
+
+  const ok = (text) => fill(msg, h('div', { class: 'success' }, text));
+  const bad = (e) => fill(msg, h('div', { class: 'error' }, /duplicate|unique/i.test(e.message || '') ? 'Така назва вже є.' : errText(e)));
+
+  // Скільки студентів / колонок / викладачів прив'язано — для підписів і попереджень
+  async function loadUsage() {
+    const [st, ls, ta] = await Promise.all([
+      sb.from('students').select('group_id'),
+      sb.from('lessons').select('id, group_id, subject_id'),
+      sb.from('teacher_assignments').select('teacher_id, group_id, subject_id'),
+    ]);
+    const count = (rows, key) => { const m = new Map(); for (const r of rows || []) m.set(r[key], (m.get(r[key]) || 0) + 1); return m; };
+    const distinct = (rows, key) => { const m = new Map(); for (const r of rows || []) { if (!m.has(r[key])) m.set(r[key], new Set()); m.get(r[key]).add(r.teacher_id); } return m; };
+    usage = {
+      students: count(st.data, 'group_id'),
+      lessonsByGroup: count(ls.data, 'group_id'),
+      lessonsBySubject: count(ls.data, 'subject_id'),
+      lessonIdsBySubject: (ls.data || []).reduce((m, l) => { (m.get(l.subject_id) || m.set(l.subject_id, []).get(l.subject_id)).push(l.id); return m; }, new Map()),
+      lessonIdsByGroup: (ls.data || []).reduce((m, l) => { (m.get(l.group_id) || m.set(l.group_id, []).get(l.group_id)).push(l.id); return m; }, new Map()),
+      teachersByGroup: distinct(ta.data, 'group_id'),
+      teachersBySubject: distinct(ta.data, 'subject_id'),
+    };
   }
-  fill(host, h('div', { class: 'stack' }, addTo('subjects', sIn, 'Новий предмет'), addTo('groups', gIn, 'Нова група'), msg, lists));
+
+  async function gradeCount(lessonIds) {
+    if (!lessonIds || !lessonIds.length) return 0;
+    const { count } = await sb.from('grades').select('lesson_id', { count: 'exact', head: true }).in('lesson_id', lessonIds);
+    return count || 0;
+  }
+
+  const addForm = (table, id, label, placeholder) => {
+    const input = h('input', { id, class: 'input', placeholder });
+    return h('form', {
+      class: 'card row',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const name = input.value.trim().replace(/\s+/g, ' ');
+        if (!name) return;
+        const { error } = await sb.from(table).insert({ name });
+        if (error) return bad(error);
+        input.value = '';
+        ok(`Додано: ${name}`);
+        await refresh();
+      },
+    }, h('div', { class: 'field', style: 'flex:1' }, h('label', { for: id }, label), input), h('button', { class: 'btn primary', type: 'submit' }, 'Додати'));
+  };
+
+  // Рядок списку з перейменуванням і видаленням
+  function itemRow(table, item, info, confirmDelete) {
+    const tr = h('tr', { 'data-search': normSearch(item.name) });
+    const view = () => fill(tr,
+      h('td', null, h('div', { style: 'font-weight:600' }, item.name), h('div', { class: 'hint' }, info)),
+      h('td', { style: 'text-align:right;white-space:nowrap' },
+        h('button', { class: 'btn small', type: 'button', onclick: edit }, 'Перейменувати'), ' ',
+        h('button', {
+          class: 'btn small danger', type: 'button',
+          onclick: async () => {
+            const question = await confirmDelete();
+            if (!question || !confirm(question)) return;
+            const { error } = await sb.from(table).delete().eq('id', item.id);
+            if (error) return bad(error);
+            ok(`Видалено: ${item.name}`);
+            await refresh();
+          },
+        }, 'Видалити')));
+    function edit() {
+      const input = h('input', { class: 'input', value: item.name, style: 'width:100%' });
+      const save = async () => {
+        const name = input.value.trim().replace(/\s+/g, ' ');
+        if (!name || name === item.name) return view();
+        const { error } = await sb.from(table).update({ name }).eq('id', item.id);
+        if (error) return bad(error);
+        ok(`Перейменовано: ${item.name} → ${name}`);
+        await refresh();
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') view(); });
+      fill(tr,
+        h('td', null, input),
+        h('td', { style: 'text-align:right;white-space:nowrap' },
+          h('button', { class: 'btn small primary', type: 'button', onclick: save }, 'Зберегти'), ' ',
+          h('button', { class: 'btn small', type: 'button', onclick: view }, 'Скасувати')));
+      input.focus(); input.select();
+    }
+    view();
+    return tr;
+  }
+
+  function listCard(title, searchId, rows) {
+    const search = makeSearch(searchId, 'Пошук', 'Назва');
+    const tbody = h('tbody', null, rows);
+    const card = h('div', { class: 'card stack', style: 'flex:1;min-width:320px' },
+      h('h2', { style: 'font-size:16px' }, title), search.box,
+      h('div', { style: 'overflow-x:auto' }, h('table', { class: 'list' }, tbody)));
+    search.attach(tbody);
+    return card;
+  }
+
+  function draw() {
+    const subjRows = state.subjects.map((s) => {
+      const cols = usage.lessonsBySubject.get(s.id) || 0;
+      const tch = (usage.teachersBySubject.get(s.id) || new Set()).size;
+      return itemRow('subjects', s, `викладачів: ${tch} · колонок у журналах: ${cols}`, async () => {
+        const grades = await gradeCount(usage.lessonIdsBySubject.get(s.id));
+        if (grades) return `Видалити предмет «${s.name}»?\n\nРазом з ним буде видалено ${cols} колонок журналу і ${grades} оцінок у всіх групах, а також закріплення ${tch} викладачів. Цю дію не можна скасувати.`;
+        return `Видалити предмет «${s.name}»?` + (cols || tch ? `\n\nБуде видалено ${cols} порожніх колонок і закріплення ${tch} викладачів.` : '');
+      });
+    });
+    const groupRows = state.groups.map((g) => {
+      const st = usage.students.get(g.id) || 0;
+      const cols = usage.lessonsByGroup.get(g.id) || 0;
+      const tch = (usage.teachersByGroup.get(g.id) || new Set()).size;
+      return itemRow('groups', g, `студентів: ${st} · викладачів: ${tch} · колонок: ${cols}`, async () => {
+        if (st) { bad({ message: `У групі «${g.name}» є ${st} студентів. Групу зі студентами видалити не можна: спершу видаліть студентів (вкладка «Студенти»).` }); return null; }
+        const grades = await gradeCount(usage.lessonIdsByGroup.get(g.id));
+        return `Видалити групу «${g.name}»?` + (cols || tch ? `\n\nБуде видалено ${cols} колонок журналу${grades ? ` і ${grades} оцінок` : ''} та закріплення ${tch} викладачів.` : '') + ' Цю дію не можна скасувати.';
+      });
+    });
+    fill(lists,
+      listCard(`Предмети (${state.subjects.length})`, 'ssub', subjRows),
+      listCard(`Групи (${state.groups.length})`, 'sgrp', groupRows));
+  }
+
+  async function refresh() { await Promise.all([loadRefs(), loadUsage()]); draw(); }
+
+  fill(host, h('div', { class: 'stack' },
+    addForm('subjects', 'nsub', 'Новий предмет', 'Назва предмета'),
+    addForm('groups', 'ngr', 'Нова група', 'АФК-9-26-К1ХХ(3.0д)'),
+    msg, lists));
+  fill(lists, h('div', { class: 'hint' }, 'Завантаження…'));
+  await loadUsage();
   draw();
 }
 
