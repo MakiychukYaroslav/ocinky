@@ -925,7 +925,101 @@ async function adminTeachers(host) {
     h('div', null, createBtn),
     msg);
 
-  fill(host, h('div', { class: 'stack' }, form, listHost));
+  const pendingHost = h('div');
+  fill(host, h('div', { class: 'stack' }, pendingHost, form, listHost));
+  loadPending();
+
+  // Викладачі, внесені в реєстр, але ще без акаунта
+  async function loadPending() {
+    const [r, ra] = await Promise.all([
+      sb.from('teacher_roster').select('email, full_name, is_admin').is('teacher_id', null),
+      sb.from('roster_assignments').select('email, group_id, subject_id'),
+    ]);
+    if (r.error) { fill(pendingHost, h('div', { class: 'error' }, errText(r.error))); return; }
+    const pending = (r.data || []).sort(byName);
+    if (!pending.length) { fill(pendingHost); return; }
+    const byEmail = new Map();
+    for (const a of ra.data || []) {
+      if (!byEmail.has(a.email)) byEmail.set(a.email, new Map());
+      const m = byEmail.get(a.email);
+      const subj = subjectName(a.subject_id);
+      if (!m.has(subj)) m.set(subj, []);
+      m.get(subj).push(groupName(a.group_id).replace(/^АФК-9-/, ''));
+    }
+    const btn = h('button', { class: 'btn primary', type: 'button' }, `Створити акаунти для всіх (${pending.length})`);
+    const out = h('div');
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Створити ${pending.length} акаунтів? Тимчасові паролі буде показано один раз — одразу збережіть або роздрукуйте їх.`)) return;
+      btn.disabled = true; btn.textContent = 'Створення… (до хвилини)';
+      const { data, error } = await sb.functions.invoke('create-teachers-bulk', { body: {} });
+      let errMsg = null;
+      if (error) { try { const b = await error.context.json(); errMsg = b.error || error.message; } catch (x) { errMsg = error.message; } }
+      else if (data && data.error) errMsg = data.error;
+      if (errMsg) { btn.disabled = false; btn.textContent = `Створити акаунти для всіх (${pending.length})`; fill(out, h('div', { class: 'error' }, errMsg)); return; }
+      await loadRefs();
+      showCreated(data.results || []);
+      loadList();
+    });
+    fill(pendingHost, h('div', { class: 'card stack' },
+      h('h2', { style: 'font-size:18px' }, `Очікують акаунт (${pending.length})`),
+      h('div', { class: 'hint' }, 'Ці викладачі внесені разом із предметами й групами. Натисніть кнопку — для кожного буде створено акаунт із тимчасовим паролем.'),
+      h('div', { style: 'overflow-x:auto' }, h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Пошта'), h('th', null, 'Предмети й групи'), h('th', null, ''))),
+        h('tbody', null, pending.map((t) => h('tr', null,
+          h('td', { style: 'font-weight:600' }, t.full_name),
+          h('td', null, t.email),
+          h('td', null, byEmail.has(t.email)
+            ? [...byEmail.get(t.email)].map(([subj, gs]) => h('div', null, h('strong', null, subj + ': '), gs.join(', ')))
+            : h('span', { class: 'hint' }, 'без предметів — закріпите пізніше')),
+          h('td', null, h('button', {
+            class: 'btn small danger', type: 'button',
+            onclick: async () => {
+              if (!confirm(`Прибрати ${t.full_name} зі списку очікування?`)) return;
+              const { error: de } = await sb.from('teacher_roster').delete().eq('email', t.email);
+              if (de) { fill(out, h('div', { class: 'error' }, errText(de))); return; }
+              loadPending();
+            },
+          }, 'Прибрати'))))))),
+      h('div', null, btn),
+      out));
+  }
+
+  function showCreated(results) {
+    const ok = results.filter((r) => r.password);
+    const bad = results.filter((r) => r.error);
+    const url = location.origin + location.pathname;
+    const asText = ok.map((r) => `${r.full_name}\nСайт: ${url}\nПошта: ${r.email}\nТимчасовий пароль: ${r.password}\n`).join('\n');
+    fill(pendingHost, h('div', { class: 'card stack' },
+      h('h2', { style: 'font-size:18px' }, `Створено акаунтів: ${ok.length}`),
+      h('div', { class: 'error' }, 'Паролі показано лише зараз. Роздрукуйте або скопіюйте їх, перш ніж закрити сторінку.'),
+      h('div', { class: 'row' },
+        h('button', {
+          class: 'btn primary', type: 'button',
+          onclick: () => {
+            const area = document.getElementById('print-area');
+            fill(area,
+              h('div', { class: 'print-head' }, 'Доступ до електронного журналу'),
+              h('div', { class: 'slips' }, ok.map((r) => h('div', { class: 'slip' },
+                h('div', { class: 't' }, r.full_name),
+                h('div', null, 'Сайт: ' + url),
+                h('div', null, 'Пошта: ' + r.email),
+                h('div', { class: 'c', style: 'font-size:14pt' }, r.password),
+                h('div', { class: 's' }, 'Увійдіть через «Вхід для викладачів» і змініть пароль у меню «Змінити пароль».')))));
+            window.print();
+          },
+        }, 'Друкувати картки доступу'),
+        h('button', {
+          class: 'btn', type: 'button',
+          onclick: async (e) => {
+            try { await navigator.clipboard.writeText(asText); e.target.textContent = 'Скопійовано'; }
+            catch (x) { e.target.textContent = 'Не вдалося скопіювати'; }
+          },
+        }, 'Скопіювати як текст')),
+      h('div', { style: 'overflow-x:auto' }, h('table', { class: 'list' },
+        h('thead', null, h('tr', null, h('th', null, 'Викладач'), h('th', null, 'Пошта'), h('th', null, 'Тимчасовий пароль'), h('th', null, 'Призначень'))),
+        h('tbody', null, ok.map((r) => h('tr', null, h('td', null, r.full_name), h('td', null, r.email), h('td', { class: 'mono' }, r.password), h('td', null, String(r.assignments))))))),
+      bad.length ? h('div', { class: 'error' }, 'Не вдалося: ', bad.map((r) => `${r.full_name} (${r.email}) — ${r.error}`).join('; ')) : null));
+  }
 
   async function loadList() {
     const { data, error } = await sb.from('teachers').select('id, full_name, email, is_admin');
